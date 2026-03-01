@@ -152,7 +152,7 @@ function Carta({ carta, oculta = false, seleccionada = false, onClick = null }) 
   if (oculta) {
     return (
       <div style={{
-        width: 68, height: 98, borderRadius: 10, flexShrink: 0,
+        width: 100, height: 144, borderRadius: 10, flexShrink: 0,
         background: "repeating-linear-gradient(45deg,#0f2744 0px,#0f2744 5px,#0d1f38 5px,#0d1f38 10px)",
         border: "2px solid #1e4a7a",
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -162,7 +162,7 @@ function Carta({ carta, oculta = false, seleccionada = false, onClick = null }) 
   }
   const color = PALO_COLOR[carta.palo];
   const wrapStyle = {
-    width: 78, height: 112, borderRadius: 10, flexShrink: 0,
+    width: 100, height: 144, borderRadius: 10, flexShrink: 0,
     border: seleccionada ? `3px solid ${color}` : "2px solid #c8b89a",
     cursor: onClick ? "pointer" : "default",
     transition: "all 0.15s ease",
@@ -896,7 +896,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
   };
   const mkBtn = (accent = "#F6C90E", dark = false) => ({
     padding: "9px 20px", borderRadius: 8, border: "none",
-    fontFamily: "inherit", fontSize: 14, fontWeight: 700,
+    fontFamily: "inherit", fontSize: 16, fontWeight: 700,
     cursor: "pointer", transition: "all 0.15s", letterSpacing: "0.04em",
     background: dark
       ? `linear-gradient(135deg,${accent}33,${accent}22)`
@@ -966,14 +966,14 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
       {/* Cabecera */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", maxWidth: 680 }}>
         <p style={{ ...titulo, fontSize: "clamp(1.1rem,3.2vw,1.8rem)", flex: 1, margin: 0 }}>🂡 MUS</p>
-        <div style={{ fontSize: 11, color: "#F6C90E99", fontWeight: 700, letterSpacing: "0.1em" }}>
+        <div style={{ fontSize: 14, color: "#F6C90E99", fontWeight: 700, letterSpacing: "0.1em" }}>
           {etiquetaFase}
         </div>
         {[{ l: "TÚ", v: puntosJugador + boteJugador, c: "#F6C90E", esMano: esManoJugador },
           { l: "BOT", v: puntosBot + boteBot, c: "#e63946", esMano: !esManoJugador }].map(({ l, v, c, esMano }) => (
           <div key={l} style={{ ...panel, textAlign: "center", minWidth: 58, padding: "7px 12px", border: esMano ? "1px solid #a080c066" : panel.border }}>
             <div style={{ fontSize: 10, color: "#7a6030" }}>{l}</div>
-            {esMano && <div style={{ fontSize: 8, color: "#a080c0", fontWeight: 700, letterSpacing: "0.1em" }}>MANO</div>}
+            {esMano && <div style={{ fontSize: 10, color: "#a080c0", fontWeight: 700, letterSpacing: "0.1em" }}>MANO</div>}
             <div style={{ fontSize: 21, fontWeight: 800, color: c, lineHeight: 1.1 }}>{v}</div>
           </div>
         ))}
@@ -1010,7 +1010,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
         {mensajes.length === 0 && <span style={{ color: "#4a3820", fontSize: 12 }}>—</span>}
         {mensajes.map(m => (
           <div key={m.id} style={{
-            fontSize: 12.5, lineHeight: 1.4,
+            fontSize: 16, lineHeight: 1.4,
             color: {
               bot: "#e8a0a0", jugador: "#a0d8a0", sistema: "#F6C90Ecc",
               exito: "#80d8e8", error: "#e88080"
@@ -1021,7 +1021,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
 
       {/* Mano jugador */}
       <div style={{ ...panel, width: "100%", maxWidth: 680 }}>
-        <div style={{ fontSize: 11, color: "#7a6030", marginBottom: 10, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+        <div style={{ fontSize: 14, color: "#7a6030", marginBottom: 10, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
           <span>TU MANO{esManoJugador && <span style={{ color: "#a080c0", fontWeight: 700, marginLeft: 8 }}>(mano)</span>}</span>
           {infoManoJ && <span style={{ color: "#F6C90Eaa" }}>{infoManoJ}</span>}
         </div>
@@ -1038,21 +1038,21 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
       {/* Resumen de mano */}
       {fase === "puntos" && resumenMano.length > 0 && (
         <div style={{ ...panel, width: "100%", maxWidth: 680, border: "1px solid #F6C90E44" }}>
-          <div style={{ fontSize: 11, color: "#F6C90Ecc", fontWeight: 700, letterSpacing: "0.12em", marginBottom: 10 }}>
+          <div style={{ fontSize: 14, color: "#F6C90Ecc", fontWeight: 700, letterSpacing: "0.12em", marginBottom: 10 }}>
             RESUMEN DE LA MANO
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {resumenMano.map(({ lance, quien, pts, info }, idx) => (
-              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <span style={{ color: "#7a6030", minWidth: 52, flexShrink: 0 }}>{lance}</span>
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 16 }}>
+                <span style={{ color: "gold", minWidth: 52, flexShrink: 0 }}>{lance}</span>
                 <span style={{ fontWeight: 700, color: quien === "jugador" ? "#80d8a0" : "#e8a0a0" }}>
                   {quien === "jugador" ? "Tú" : "Bot"} +{pts}
                 </span>
-                {info && <span style={{ fontSize: 11, color: "#5a4820" }}>{info}</span>}
+                {info && <span style={{ fontSize: 14, color: "orangered" }}>{info}</span>}
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px solid rgba(180,140,60,0.15)", display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+          <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px solid rgba(180,140,60,0.15)", display: "flex", justifyContent: "space-between", fontSize: 16 }}>
             <span style={{ color: "#a08050" }}>Total mano:</span>
             <span>
               <span style={{ color: "#80d8a0", fontWeight: 700 }}>Tú +{boteJugador}</span>
