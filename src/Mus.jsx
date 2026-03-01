@@ -211,6 +211,8 @@ export default function Mus() {
   const [esManoJugador, setEsManoJugador] = useState(true);
   // Apuesta extra de punto (se suma al base 1 del ganador al final)
   const [apuestaExtraPunto, setApuestaExtraPunto] = useState(null); // {quien, extra}
+  // Resumen del conteo al final de cada mano
+  const [resumenMano, setResumenMano] = useState([]);
 
   // Refs para evitar stale closures en callbacks async
   const manoJRef = useRef([]);
@@ -240,6 +242,8 @@ export default function Mus() {
   useEffect(() => { esManoJRef.current = esManoJugador; }, [esManoJugador]);
   const apuestaExtraPuntoRef = useRef(null);
   useEffect(() => { apuestaExtraPuntoRef.current = apuestaExtraPunto; }, [apuestaExtraPunto]);
+  const grandeResultadoRef = useRef(null);
+  const chicaResultadoRef = useRef(null);
 
   const log = useCallback((msg, tipo = "info") => {
     setMensajes(prev => [...prev.slice(-30), { msg, tipo, id: Date.now() + Math.random() }]);
@@ -266,6 +270,9 @@ export default function Mus() {
     setApuestaExtraPunto(null);
     setGrandeApostado(false);
     setChicaApostado(false);
+    setResumenMano([]);
+    grandeResultadoRef.current = null;
+    chicaResultadoRef.current = null;
     log("🃏 Cartas repartidas. ¿Mus o no hay mus?", "sistema");
   }, [log]);
 
@@ -411,20 +418,22 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
         const total = 1 + base;
         setBoteJugador(prev => prev + total);
         log(`✅ No quiero: tú ganas ${total} en pares (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraPares({ quien: "jugador", extra: 0, resuelto: true });
+        setApuestaExtraPares({ quien: "jugador", extra: 0, resuelto: true, pts: total });
       } else if (tipo === "juego") {
         const base = puntosJuegoSinOponente(manoJRef.current);
         const total = 1 + base;
         setBoteJugador(prev => prev + total);
         log(`✅ No quiero: tú ganas ${total} en juego (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraJuego({ quien: "jugador", extra: 0, resuelto: true });
+        setApuestaExtraJuego({ quien: "jugador", extra: 0, resuelto: true, pts: total });
       } else if (tipo === "punto") {
         setBoteJugador(prev => prev + 2);
         log(`✅ No quiero: tú ganas 2 en punto (1 porque no + 1 base)`, "exito");
-        setApuestaExtraPunto({ quien: "jugador", extra: 0, resuelto: true });
+        setApuestaExtraPunto({ quien: "jugador", extra: 0, resuelto: true, pts: 2 });
       } else {
         setBoteJugador(prev => prev + 1);
         log(`✅ Tú ganas 1 piedra (porque no) en ${tipo}`, "exito");
+        if (tipo === "grande") grandeResultadoRef.current = { quien: "jugador", pts: 1 };
+        if (tipo === "chica") chicaResultadoRef.current = { quien: "jugador", pts: 1 };
       }
       setApuestaAbierta(null);
       avanzarFase(tipo);
@@ -445,20 +454,22 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
       const total = 1 + base;
       setBoteBot(prev => prev + total);
       log(`❌ No quiero: bot gana ${total} en pares (1 porque no + ${base} base)`, "error");
-      setApuestaExtraPares({ quien: "bot", extra: 0, resuelto: true });
+      setApuestaExtraPares({ quien: "bot", extra: 0, resuelto: true, pts: total });
     } else if (tipo === "juego") {
       const base = puntosJuegoSinOponente(manoBRef.current);
       const total = 1 + base;
       setBoteBot(prev => prev + total);
       log(`❌ No quiero: bot gana ${total} en juego (1 porque no + ${base} base)`, "error");
-      setApuestaExtraJuego({ quien: "bot", extra: 0, resuelto: true });
+      setApuestaExtraJuego({ quien: "bot", extra: 0, resuelto: true, pts: total });
     } else if (tipo === "punto") {
       setBoteBot(prev => prev + 2);
       log(`❌ No quiero: bot gana 2 en punto (1 porque no + 1 base)`, "error");
-      setApuestaExtraPunto({ quien: "bot", extra: 0, resuelto: true });
+      setApuestaExtraPunto({ quien: "bot", extra: 0, resuelto: true, pts: 2 });
     } else {
       setBoteBot(prev => prev + 1);
       log(`❌ Bot gana 1 piedra (porque no) en ${tipo}`, "error");
+      if (tipo === "grande") grandeResultadoRef.current = { quien: "bot", pts: 1 };
+      if (tipo === "chica") chicaResultadoRef.current = { quien: "bot", pts: 1 };
     }
     setApuestaAbierta(null);
     avanzarFase(tipo);
@@ -485,20 +496,22 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
         const total = 1 + base;
         setBoteJugador(prev => prev + total);
         log(`✅ No quiero: tú ganas ${total} en pares (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraPares({ quien: "jugador", extra: 0, resuelto: true });
+        setApuestaExtraPares({ quien: "jugador", extra: 0, resuelto: true, pts: total });
       } else if (tipo === "juego") {
         const base = puntosJuegoSinOponente(manoJRef.current);
         const total = 1 + base;
         setBoteJugador(prev => prev + total);
         log(`✅ No quiero: tú ganas ${total} en juego (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraJuego({ quien: "jugador", extra: 0, resuelto: true });
+        setApuestaExtraJuego({ quien: "jugador", extra: 0, resuelto: true, pts: total });
       } else if (tipo === "punto") {
         setBoteJugador(prev => prev + 2);
         log(`✅ No quiero: tú ganas 2 en punto (1 porque no + 1 base)`, "exito");
-        setApuestaExtraPunto({ quien: "jugador", extra: 0, resuelto: true });
+        setApuestaExtraPunto({ quien: "jugador", extra: 0, resuelto: true, pts: 2 });
       } else {
         setBoteJugador(prev => prev + 1);
         log(`✅ Tú ganas 1 piedra (porque no) en ${tipo}`, "exito");
+        if (tipo === "grande") grandeResultadoRef.current = { quien: "jugador", pts: 1 };
+        if (tipo === "chica") chicaResultadoRef.current = { quien: "jugador", pts: 1 };
       }
       setApuestaAbierta(null);
       avanzarFase(tipo);
@@ -549,6 +562,8 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
       // Grande y chica: el ganador se lleva directamente lo apostado
       if (jugGana) { setBoteJugador(prev => prev + cant); log(`✅ Tú ganas ${cant} en ${tipo} (${desc})`, "exito"); }
       else { setBoteBot(prev => prev + cant); log(`❌ Bot gana ${cant} en ${tipo} (${desc})`, "error"); }
+      if (tipo === "grande") grandeResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
+      else chicaResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
     } else {
       // Pares, juego y punto: guardar apuesta extra; los puntos base se calculan al final
       const extra = { quien: jugGana ? "jugador" : "bot", extra: cant };
@@ -571,126 +586,148 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
   const resolverPunto = () => {
     const mJ = manoJRef.current, mB = manoBRef.current;
     const jTieneJuego = tieneJuego(mJ), bTieneJuego = tieneJuego(mB);
+    const _res = [];
 
-    // ── Grande en paso: 1 punto al de mejor grande carta a carta ──
-    if (!grandeApostadoRef.current) {
+    // ── Grande ──
+    {
       const cmp = compararManos(mJ, mB, "grande");
-      const jugGanaGrande = cmp > 0 || (cmp === 0 && esManoJRef.current);
-      if (jugGanaGrande) { setBoteJugador(prev => prev + 1); log(`Grande (paso): tú ganas 1 punto`, "exito"); }
-      else { setBoteBot(prev => prev + 1); log(`Grande (paso): bot gana 1 punto`, "error"); }
+      const jugGana = cmp > 0 || (cmp === 0 && esManoJRef.current);
+      if (!grandeApostadoRef.current) {
+        if (jugGana) { setBoteJugador(prev => prev + 1); log(`Grande (paso): tú ganas 1 punto`, "exito"); }
+        else { setBoteBot(prev => prev + 1); log(`Grande (paso): bot gana 1 punto`, "error"); }
+        _res.push({ lance: "Grande", quien: jugGana ? "jugador" : "bot", pts: 1, info: "paso" });
+      } else {
+        const r = grandeResultadoRef.current;
+        if (r) _res.push({ lance: "Grande", quien: r.quien, pts: r.pts, info: "apostado" });
+      }
     }
 
-    // ── Chica en paso: 1 punto al de mejor chica carta a carta ──
-    if (!chicaApostadoRef.current) {
+    // ── Chica ──
+    {
       const cmp = compararManos(mJ, mB, "chica");
-      const jugGanaChica = cmp > 0 || (cmp === 0 && esManoJRef.current);
-      if (jugGanaChica) { setBoteJugador(prev => prev + 1); log(`Chica (paso): tú ganas 1 punto`, "exito"); }
-      else { setBoteBot(prev => prev + 1); log(`Chica (paso): bot gana 1 punto`, "error"); }
+      const jugGana = cmp > 0 || (cmp === 0 && esManoJRef.current);
+      if (!chicaApostadoRef.current) {
+        if (jugGana) { setBoteJugador(prev => prev + 1); log(`Chica (paso): tú ganas 1 punto`, "exito"); }
+        else { setBoteBot(prev => prev + 1); log(`Chica (paso): bot gana 1 punto`, "error"); }
+        _res.push({ lance: "Chica", quien: jugGana ? "jugador" : "bot", pts: 1, info: "paso" });
+      } else {
+        const r = chicaResultadoRef.current;
+        if (r) _res.push({ lance: "Chica", quien: r.quien, pts: r.pts, info: "apostado" });
+      }
     }
 
-    // ── Puntos de PARES: solo cobra el ganador del lance ──
+    // ── Pares ──
     const jPares = tienePareja(mJ), bPares = tienePareja(mB);
-    if ((jPares || bPares) && !apuestaExtraParesRef.current?.resuelto) {
-      const extraPares = apuestaExtraParesRef.current;
-      let ganadorPares, ptsBase;
-      if (jPares && !bPares) {
-        ganadorPares = "jugador";
-        ptsBase = puntosParesSinOponente(mJ);
-      } else if (bPares && !jPares) {
-        ganadorPares = "bot";
-        ptsBase = puntosParesSinOponente(mB);
+    if (jPares || bPares) {
+      if (apuestaExtraParesRef.current?.resuelto) {
+        const r = apuestaExtraParesRef.current;
+        _res.push({ lance: "Pares", quien: r.quien, pts: r.pts || 0, info: "no quiero" });
       } else {
-        // Ambos tienen pares → gana el de mayor valor
-        const vJ = valorPareja(mJ), vB = valorPareja(mB);
-        ganadorPares = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
-        ptsBase = ganadorPares === "jugador" ? puntosParesSinOponente(mJ) : puntosParesSinOponente(mB);
-      }
-      // Extra apostado: solo suma al ganador del lance de pares
-      const extra = extraPares?.quien === ganadorPares ? extraPares.extra : 0;
-      const total = ptsBase + extra;
-      if (ganadorPares === "jugador") {
-        setBoteJugador(prev => prev + total);
-        log(`Pares: tú ganas ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "exito");
-      } else {
-        setBoteBot(prev => prev + total);
-        log(`Pares: bot gana ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "error");
-      }
-      // Si hubo apuesta y la ganó quien NO tiene pares (ganó el porque-no), solo cobra el extra
-      if (extraPares && extraPares.extra > 0 && extraPares.quien !== ganadorPares) {
-        if (extraPares.quien === "jugador") {
-          setBoteJugador(prev => prev + extraPares.extra);
-          log(`Pares: tú cobras +${extraPares.extra} (porque no) aunque el bot tiene mejores pares`, "exito");
+        const extraPares = apuestaExtraParesRef.current;
+        let ganadorPares, ptsBase;
+        if (jPares && !bPares) {
+          ganadorPares = "jugador"; ptsBase = puntosParesSinOponente(mJ);
+        } else if (bPares && !jPares) {
+          ganadorPares = "bot"; ptsBase = puntosParesSinOponente(mB);
         } else {
-          setBoteBot(prev => prev + extraPares.extra);
-          log(`Pares: bot cobra +${extraPares.extra} (porque no) aunque tú tienes mejores pares`, "error");
+          const vJ = valorPareja(mJ), vB = valorPareja(mB);
+          ganadorPares = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
+          ptsBase = ganadorPares === "jugador" ? puntosParesSinOponente(mJ) : puntosParesSinOponente(mB);
+        }
+        const extra = extraPares?.quien === ganadorPares ? extraPares.extra : 0;
+        const total = ptsBase + extra;
+        if (ganadorPares === "jugador") {
+          setBoteJugador(prev => prev + total);
+          log(`Pares: tú ganas ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "exito");
+        } else {
+          setBoteBot(prev => prev + total);
+          log(`Pares: bot gana ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "error");
+        }
+        _res.push({ lance: "Pares", quien: ganadorPares, pts: total, info: extra > 0 ? `base ${ptsBase} + ${extra} ap.` : `base ${ptsBase}` });
+        if (extraPares && extraPares.extra > 0 && extraPares.quien !== ganadorPares) {
+          if (extraPares.quien === "jugador") {
+            setBoteJugador(prev => prev + extraPares.extra);
+            log(`Pares: tú cobras +${extraPares.extra} (porque no) aunque el bot tiene mejores pares`, "exito");
+          } else {
+            setBoteBot(prev => prev + extraPares.extra);
+            log(`Pares: bot cobra +${extraPares.extra} (porque no) aunque tú tienes mejores pares`, "error");
+          }
         }
       }
     }
 
-    // ── PUNTO: solo cuando ninguno tiene juego (siempre 1 base + lo apostado) ──
-    if (!jTieneJuego && !bTieneJuego && !apuestaExtraPuntoRef.current?.resuelto) {
-      const vJ = puntosMano(mJ), vB = puntosMano(mB);
-      const ganadorPunto = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
-      const extraPunto = apuestaExtraPuntoRef.current;
-      const extra = extraPunto?.quien === ganadorPunto ? extraPunto.extra : 0;
-      const total = 1 + extra;
-      if (ganadorPunto === "jugador") {
-        setBoteJugador(prev => prev + total);
-        log(`Punto: tú ganas ${total} (base 1${extra > 0 ? ` + ${extra} apostado` : ""}, tú ${vJ} vs Bot ${vB})`, "exito");
+    // ── Punto ──
+    if (!jTieneJuego && !bTieneJuego) {
+      if (apuestaExtraPuntoRef.current?.resuelto) {
+        const r = apuestaExtraPuntoRef.current;
+        _res.push({ lance: "Punto", quien: r.quien, pts: r.pts || 2, info: "no quiero" });
       } else {
-        setBoteBot(prev => prev + total);
-        log(`Punto: bot gana ${total} (base 1${extra > 0 ? ` + ${extra} apostado` : ""}, tú ${vJ} vs Bot ${vB})`, "error");
-      }
-      // Si hubo apuesta y la ganó quien perdió la comparación (porque-no), ya cobró su 1 directamente
-      if (extraPunto && extraPunto.extra > 0 && extraPunto.quien !== ganadorPunto) {
-        if (extraPunto.quien === "jugador") {
-          setBoteJugador(prev => prev + extraPunto.extra);
-          log(`Punto: tú cobras +${extraPunto.extra} (porque no) aunque el bot tiene mejor punto`, "exito");
+        const vJ = puntosMano(mJ), vB = puntosMano(mB);
+        const ganadorPunto = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
+        const extraPunto = apuestaExtraPuntoRef.current;
+        const extra = extraPunto?.quien === ganadorPunto ? extraPunto.extra : 0;
+        const total = 1 + extra;
+        if (ganadorPunto === "jugador") {
+          setBoteJugador(prev => prev + total);
+          log(`Punto: tú ganas ${total} (base 1${extra > 0 ? ` + ${extra} apostado` : ""}, tú ${vJ} vs Bot ${vB})`, "exito");
         } else {
-          setBoteBot(prev => prev + extraPunto.extra);
-          log(`Punto: bot cobra +${extraPunto.extra} (porque no) aunque tú tienes mejor punto`, "error");
+          setBoteBot(prev => prev + total);
+          log(`Punto: bot gana ${total} (base 1${extra > 0 ? ` + ${extra} apostado` : ""}, tú ${vJ} vs Bot ${vB})`, "error");
+        }
+        _res.push({ lance: "Punto", quien: ganadorPunto, pts: total, info: `tú ${vJ} vs bot ${vB}` });
+        if (extraPunto && extraPunto.extra > 0 && extraPunto.quien !== ganadorPunto) {
+          if (extraPunto.quien === "jugador") {
+            setBoteJugador(prev => prev + extraPunto.extra);
+            log(`Punto: tú cobras +${extraPunto.extra} (porque no) aunque el bot tiene mejor punto`, "exito");
+          } else {
+            setBoteBot(prev => prev + extraPunto.extra);
+            log(`Punto: bot cobra +${extraPunto.extra} (porque no) aunque tú tienes mejor punto`, "error");
+          }
         }
       }
     }
 
-    // ── Puntos de JUEGO: solo cobra el ganador del lance ──
-    if ((jTieneJuego || bTieneJuego) && !apuestaExtraJuegoRef.current?.resuelto) {
-      const extraJuego = apuestaExtraJuegoRef.current;
-      let ganadorJuego, ptsBase;
-      if (jTieneJuego && !bTieneJuego) {
-        ganadorJuego = "jugador";
-        ptsBase = puntosJuegoSinOponente(mJ);
-      } else if (bTieneJuego && !jTieneJuego) {
-        ganadorJuego = "bot";
-        ptsBase = puntosJuegoSinOponente(mB);
+    // ── Juego ──
+    if (jTieneJuego || bTieneJuego) {
+      if (apuestaExtraJuegoRef.current?.resuelto) {
+        const r = apuestaExtraJuegoRef.current;
+        _res.push({ lance: "Juego", quien: r.quien, pts: r.pts || 0, info: "no quiero" });
       } else {
-        // Ambos tienen juego → gana el de mayor valor (31 real > 31 > 32 > resto desc)
-        const vJ = valorJuego(mJ), vB = valorJuego(mB);
-        ganadorJuego = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
-        ptsBase = ganadorJuego === "jugador" ? puntosJuegoSinOponente(mJ) : puntosJuegoSinOponente(mB);
-      }
-      const extra = extraJuego?.quien === ganadorJuego ? extraJuego.extra : 0;
-      const total = ptsBase + extra;
-      if (ganadorJuego === "jugador") {
-        setBoteJugador(prev => prev + total);
-        log(`Juego: tú ganas ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "exito");
-      } else {
-        setBoteBot(prev => prev + total);
-        log(`Juego: bot gana ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "error");
-      }
-      // Si hubo apuesta y la ganó quien NO tiene juego (porque-no), solo cobra el extra
-      if (extraJuego && extraJuego.extra > 0 && extraJuego.quien !== ganadorJuego) {
-        if (extraJuego.quien === "jugador") {
-          setBoteJugador(prev => prev + extraJuego.extra);
-          log(`Juego: tú cobras +${extraJuego.extra} (porque no) aunque el bot tiene mejor juego`, "exito");
+        const extraJuego = apuestaExtraJuegoRef.current;
+        let ganadorJuego, ptsBase;
+        if (jTieneJuego && !bTieneJuego) {
+          ganadorJuego = "jugador"; ptsBase = puntosJuegoSinOponente(mJ);
+        } else if (bTieneJuego && !jTieneJuego) {
+          ganadorJuego = "bot"; ptsBase = puntosJuegoSinOponente(mB);
         } else {
-          setBoteBot(prev => prev + extraJuego.extra);
-          log(`Juego: bot cobra +${extraJuego.extra} (porque no) aunque tú tienes mejor juego`, "error");
+          const vJ = valorJuego(mJ), vB = valorJuego(mB);
+          ganadorJuego = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
+          ptsBase = ganadorJuego === "jugador" ? puntosJuegoSinOponente(mJ) : puntosJuegoSinOponente(mB);
+        }
+        const extra = extraJuego?.quien === ganadorJuego ? extraJuego.extra : 0;
+        const total = ptsBase + extra;
+        if (ganadorJuego === "jugador") {
+          setBoteJugador(prev => prev + total);
+          log(`Juego: tú ganas ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "exito");
+        } else {
+          setBoteBot(prev => prev + total);
+          log(`Juego: bot gana ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "error");
+        }
+        _res.push({ lance: "Juego", quien: ganadorJuego, pts: total, info: extra > 0 ? `base ${ptsBase} + ${extra} ap.` : `base ${ptsBase}` });
+        if (extraJuego && extraJuego.extra > 0 && extraJuego.quien !== ganadorJuego) {
+          if (extraJuego.quien === "jugador") {
+            setBoteJugador(prev => prev + extraJuego.extra);
+            log(`Juego: tú cobras +${extraJuego.extra} (porque no) aunque el bot tiene mejor juego`, "exito");
+          } else {
+            setBoteBot(prev => prev + extraJuego.extra);
+            log(`Juego: bot cobra +${extraJuego.extra} (porque no) aunque tú tienes mejor juego`, "error");
+          }
         }
       }
     }
 
     setMostrarBotCartas(true);
+    setResumenMano(_res);
     setFase("puntos");
   };
 
@@ -977,6 +1014,34 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
           ))}
         </div>
       </div>
+
+      {/* Resumen de mano */}
+      {fase === "puntos" && resumenMano.length > 0 && (
+        <div style={{ ...panel, width: "100%", maxWidth: 680, border: "1px solid #F6C90E44" }}>
+          <div style={{ fontSize: 11, color: "#F6C90Ecc", fontWeight: 700, letterSpacing: "0.12em", marginBottom: 10 }}>
+            RESUMEN DE LA MANO
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {resumenMano.map(({ lance, quien, pts, info }, idx) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <span style={{ color: "#7a6030", minWidth: 52, flexShrink: 0 }}>{lance}</span>
+                <span style={{ fontWeight: 700, color: quien === "jugador" ? "#80d8a0" : "#e8a0a0" }}>
+                  {quien === "jugador" ? "Tú" : "Bot"} +{pts}
+                </span>
+                {info && <span style={{ fontSize: 11, color: "#5a4820" }}>{info}</span>}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px solid rgba(180,140,60,0.15)", display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <span style={{ color: "#a08050" }}>Total mano:</span>
+            <span>
+              <span style={{ color: "#80d8a0", fontWeight: 700 }}>Tú +{boteJugador}</span>
+              <span style={{ color: "#5a4820", margin: "0 6px" }}>·</span>
+              <span style={{ color: "#e8a0a0", fontWeight: 700 }}>Bot +{boteBot}</span>
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Controles */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 680 }}>
