@@ -146,7 +146,7 @@ Juegas estratégicamente según el marcador, con faroles en las apuestas cuando 
 // ── COMPONENTE CARTA ──────────────────────────────────────────────────────────
 // Las imágenes deben estar en public/cartas/{valor}_{palo}.png
 // Ejemplo: public/cartas/1_oros.png, public/cartas/12_bastos.png, etc.
-const USAR_IMAGENES = false; // ← ponlo en true cuando tengas las imágenes en public/cartas/
+const USAR_IMAGENES = true;
 
 function Carta({ carta, oculta = false, seleccionada = false, onClick = null }) {
   if (oculta) {
