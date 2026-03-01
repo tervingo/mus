@@ -116,7 +116,10 @@ function manoATexto(mano) {
 // ── IA CON CLAUDE API ─────────────────────────────────────────────────────────
 async function consultarIA(prompt) {
   try {
-    const res = await fetch("http://localhost:3001/api/claude", {
+    const apiUrl = import.meta.env.DEV
+      ? "http://localhost:3001/api/claude"
+      : "/.netlify/functions/claude"
+    const res = await fetch(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
