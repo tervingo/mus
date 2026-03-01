@@ -79,7 +79,7 @@ function rangoChica(v) {
 // Devuelve 1 si manoA gana, -1 si manoB gana, 0 si empate (gana mano = jugador)
 function compararManos(manoA, manoB, tipo) {
   const rankFn = tipo === "grande" ? rangoGrande : rangoChica;
-  const sortDir = tipo === "grande" ? -1 : 1; // grande: desc, chica: asc
+  const sortDir = tipo === "grande" ? 1 : -1; // grande: desc (mayor primero), chica: asc (menor primero)
   const sortedA = [...manoA].sort((a, b) => sortDir * (rankFn(b.valor) - rankFn(a.valor)));
   const sortedB = [...manoB].sort((a, b) => sortDir * (rankFn(b.valor) - rankFn(a.valor)));
   for (let i = 0; i < 4; i++) {
