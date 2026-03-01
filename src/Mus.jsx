@@ -112,6 +112,40 @@ function valorPareja(mano) {
 function manoATexto(mano) {
   return mano.map(c => `${NOMBRES_VALOR[c.valor]} de ${c.palo}`).join(", ");
 }
+// Devuelve la mano ordenada para grande (desc) o chica (asc) como texto
+function manoOrdenadaGrande(mano) {
+  return [...mano]
+    .sort((a, b) => rangoGrande(b.valor) - rangoGrande(a.valor))
+    .map(c => NOMBRES_VALOR[c.valor]).join(" > ");
+}
+function manoOrdenadaChica(mano) {
+  return [...mano]
+    .sort((a, b) => rangoGrande(a.valor) - rangoGrande(b.valor))
+    .map(c => NOMBRES_VALOR[c.valor]).join(" < ");
+}
+// Fuerza relativa de la mano (0-100) para grande y chica
+function fuerzaGrande(mano) {
+  const r = [...mano].sort((a, b) => rangoGrande(b.valor) - rangoGrande(a.valor))
+    .map(c => rangoGrande(c.valor));
+  const score = r[0]*512 + r[1]*64 + r[2]*8 + r[3]; // max=4680, min=585
+  const pct = Math.round((score - 585) / (4680 - 585) * 100);
+  if (pct >= 80) return "muy fuerte";
+  if (pct >= 55) return "fuerte";
+  if (pct >= 35) return "media";
+  if (pct >= 15) return "débil";
+  return "muy débil";
+}
+function fuerzaChica(mano) {
+  const r = [...mano].sort((a, b) => rangoGrande(a.valor) - rangoGrande(b.valor))
+    .map(c => rangoGrande(c.valor));
+  const score = r[0]*512 + r[1]*64 + r[2]*8 + r[3]; // menor = mejor para chica
+  const pct = Math.round((4680 - score) / (4680 - 585) * 100);
+  if (pct >= 80) return "muy fuerte";
+  if (pct >= 55) return "fuerte";
+  if (pct >= 35) return "media";
+  if (pct >= 15) return "débil";
+  return "muy débil";
+}
 
 // ── IA CON CLAUDE API ─────────────────────────────────────────────────────────
 async function consultarIA(prompt) {
@@ -126,10 +160,21 @@ async function consultarIA(prompt) {
         model: "claude-sonnet-4-20250514",
         max_tokens: 1000,
         system: `Eres un jugador experto de mus español. Respondes ÚNICAMENTE con JSON válido sin texto adicional ni markdown.
-Reglas de cartas: en el mus los 3 equivalen a Reyes (valen 10 puntos y cuentan como Reyes en pares), los 2 equivalen a Ases (valen 1 punto y cuentan como Ases en pares). Sotas y Caballos tienen valor propio (10 y 10 pts respectivamente... espera: Sota=10, Caballo=10, Rey=10, 3=10; As=1, 2=1).
-Lances: Grande (gana quien tenga la carta más alta según R/3>C>S>7>6>5>4>A/2, comparando carta a carta de mayor a menor; en empate gana el mano), Chica (gana quien tenga la carta más baja según A/2<4<5<6<7<S<C<R/3, comparando carta a carta de menor a mayor; en empate gana el mano), Pares (duples > medias > pareja; duples=2 parejas sean iguales o distintas=3pts, medias=3 iguales=2pts, pareja=2 iguales=1pt; en empate gana el de mayor valor de carta), Juego (necesitas 31+ puntos; la 31 real = tres 7s y una Sota es la mejor jugada de juego y gana a cualquier otro 31 incluso al mano; luego 31 normal, luego 32, luego de mayor a menor).
-Las declaraciones de pares y juego son OBLIGATORIAMENTE honestas, no se puede mentir.
-Juegas estratégicamente según el marcador, con faroles en las apuestas cuando conviene.`,
+
+EQUIVALENCIAS: los 3 valen como Reyes (en todas las situaciones), los 2 valen como Ases (en todas las situaciones).
+
+LANCES Y CÓMO SE GANAN:
+- Grande: gana quien tenga cartas MÁS ALTAS comparando carta a carta (de mayor a menor) según la escala R/3 > C > S > 7 > 6 > 5 > 4 > A/2. NO se suman puntos: se compara la 1ª carta con la 1ª carta, si hay empate la 2ª con la 2ª, etc. En empate absoluto gana el mano.
+- Chica: igual pero gana quien tenga cartas MÁS BAJAS. Escala A/2 < 4 < 5 < 6 < 7 < S < C < R/3. NO se suman puntos: se compara la carta más baja del jugador con la más baja del rival, etc. En empate gana el mano.
+- Pares: se requiere al menos una pareja. Duples (dos parejas) > Medias (trío) > Pareja. En empate gana quien tenga el grupo de mayor valor de carta. Las declaraciones son obligatoriamente honestas.
+- Juego: necesitas suma de puntos ≥ 31 (Rey/Caballo/Sota/3=10pts, As/2=1pt, resto=su valor). Gana: 31 real (tres 7s+Sota) > 31 normal > 32 > 33 > ... Las declaraciones son obligatoriamente honestas.
+- Punto: solo si ninguno tiene juego. Gana quien tenga más puntos (máx. 30).
+
+ESTRATEGIA:
+- En grande y chica, recibirás tu mano ordenada y una valoración de fuerza (muy fuerte/fuerte/media/débil/muy débil). Basa tus decisiones de apuesta en esa fuerza, no en suposiciones sobre puntos.
+- Farolea cuando vayas perdiendo en el marcador o cuando tu mano sea débil pero tengas algo que ganar.
+- Si vas ganando cómodamente, juega más conservador para no arriesgar.
+- El mano habla primero en cada lance y gana los empates: ten esto en cuenta al decidir si envidar o pasar.`,
         messages: [{ role: "user", content: prompt }]
       })
     });
@@ -349,9 +394,10 @@ Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
     log(`Tú: Descartas ${cartasSeleccionadas.length} carta(s)`, "jugador");
     setEsperandoBot(true);
     const manoB = manoBRef.current;
-    const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
-¿Qué cartas descartarías para mejorar tus opciones en grande, chica, pares y juego?
-Responde JSON: {"indicesToDescartar": [0-3], "razon": "breve"}`);
+    const resp = await consultarIA(`Tu mano (índices 0-3): ${manoATexto(manoB)}.
+Para grande quieres cartas ALTAS (R/3>C>S>7>6>5>4>A/2). Para chica quieres cartas BAJAS (A/2<4<5<6<7<S<C<R/3). Para pares quieres repeticiones. Para juego quieres suma ≥31 pts.
+¿Qué índices de carta descartarías? Considera qué lances tienes más opciones de ganar y optimiza para ellos.
+Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede ser vacía], "razon": "breve"}`);
     setEsperandoBot(false);
     const indices = resp?.indicesToDescartar?.filter(i => i >= 0 && i < 4) || [];
     const baraja2 = barajar(crearBaraja());
@@ -377,8 +423,8 @@ Responde JSON: {"indicesToDescartar": [0-3], "razon": "breve"}`);
     const manoInfo = !esManoJRef.current
       ? "Eres el MANO (en empate, ganas)."
       : "Eres el POSTRE (el rival es mano; en empate, pierdes).";
-    if (tipo === "grande") return `Grande (más puntos gana). Tus puntos: ${puntosMano(manoB)}. ${manoInfo}`;
-    if (tipo === "chica") return `Chica (menos puntos gana). Tus puntos: ${puntosMano(manoB)}. ${manoInfo}`;
+    if (tipo === "grande") return `Grande (gana quien tenga cartas MÁS ALTAS carta a carta según escala R/3>C>S>7>6>5>4>A/2 — NO es suma de puntos). Tu mano de mayor a menor: ${manoOrdenadaGrande(manoB)}. Fuerza: ${fuerzaGrande(manoB)}. ${manoInfo}`;
+    if (tipo === "chica") return `Chica (gana quien tenga cartas MÁS BAJAS carta a carta según escala A/2<4<5<6<7<S<C<R/3 — NO es suma de puntos). Tu mano de menor a mayor: ${manoOrdenadaChica(manoB)}. Fuerza: ${fuerzaChica(manoB)}. ${manoInfo}`;
     if (tipo === "pares") return `Pares. Tienes: ${tienePareja(manoB) || "sin pares"}. ${manoInfo}`;
     if (tipo === "juego") return `Juego. Tienes juego: ${tieneJuego(manoB)}. Puntos: ${puntosMano(manoB)}. ${manoInfo}`;
     if (tipo === "punto") return `Punto (más puntos gana, máximo 30). Tus puntos: ${puntosMano(manoB)}. ${manoInfo}`;
