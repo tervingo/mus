@@ -132,7 +132,7 @@ function fuerzaGrande(mano) {
   if (pct >= 80) return "muy fuerte";
   if (pct >= 55) return "fuerte";
   if (pct >= 35) return "media";
-  if (pct >= 15) return "débil";
+  
   return "muy débil";
 }
 function fuerzaChica(mano) {
@@ -661,10 +661,11 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
       if (!grandeApostadoRef.current) {
         if (jugGana) { setBoteJugador(prev => prev + 1); log(`Grande (paso): tú ganas 1 punto`, "exito"); }
         else { setBoteBot(prev => prev + 1); log(`Grande (paso): bot gana 1 punto`, "error"); }
-        _res.push({ lance: "Grande", quien: jugGana ? "jugador" : "bot", pts: 1, info: "paso" });
+        _res.push({ lance: "Grande", quien: jugGana ? "jugador" : "bot", pts: 1, base: 1, apostado: 0, pqNo: 0 });
       } else {
         const r = grandeResultadoRef.current;
-        if (r) _res.push({ lance: "Grande", quien: r.quien, pts: r.pts, info: "apostado" });
+        if (r) _res.push({ lance: "Grande", quien: r.quien, pts: r.pts,
+          base: 0, apostado: r.pts > 1 ? r.pts : 0, pqNo: r.pts === 1 ? 1 : 0 });
       }
     }
 
@@ -675,10 +676,11 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
       if (!chicaApostadoRef.current) {
         if (jugGana) { setBoteJugador(prev => prev + 1); log(`Chica (paso): tú ganas 1 punto`, "exito"); }
         else { setBoteBot(prev => prev + 1); log(`Chica (paso): bot gana 1 punto`, "error"); }
-        _res.push({ lance: "Chica", quien: jugGana ? "jugador" : "bot", pts: 1, info: "paso" });
+        _res.push({ lance: "Chica", quien: jugGana ? "jugador" : "bot", pts: 1, base: 1, apostado: 0, pqNo: 0 });
       } else {
         const r = chicaResultadoRef.current;
-        if (r) _res.push({ lance: "Chica", quien: r.quien, pts: r.pts, info: "apostado" });
+        if (r) _res.push({ lance: "Chica", quien: r.quien, pts: r.pts,
+          base: 0, apostado: r.pts > 1 ? r.pts : 0, pqNo: r.pts === 1 ? 1 : 0 });
       }
     }
 
@@ -687,7 +689,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
     if (jPares || bPares) {
       if (apuestaExtraParesRef.current?.resuelto) {
         const r = apuestaExtraParesRef.current;
-        _res.push({ lance: "Pares", quien: r.quien, pts: r.pts || 0, info: "no quiero" });
+        _res.push({ lance: "Pares", quien: r.quien, pts: r.pts || 0, base: (r.pts || 1) - 1, apostado: 0, pqNo: 1 });
       } else {
         const extraPares = apuestaExtraParesRef.current;
         let ganadorPares, ptsBase;
@@ -709,7 +711,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
           setBoteBot(prev => prev + total);
           log(`Pares: bot gana ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "error");
         }
-        _res.push({ lance: "Pares", quien: ganadorPares, pts: total, info: extra > 0 ? `base ${ptsBase} + ${extra} ap.` : `base ${ptsBase}` });
+        _res.push({ lance: "Pares", quien: ganadorPares, pts: total, base: ptsBase, apostado: extra, pqNo: 0 });
         if (extraPares && extraPares.extra > 0 && extraPares.quien !== ganadorPares) {
           if (extraPares.quien === "jugador") {
             setBoteJugador(prev => prev + extraPares.extra);
@@ -726,7 +728,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
     if (!jTieneJuego && !bTieneJuego) {
       if (apuestaExtraPuntoRef.current?.resuelto) {
         const r = apuestaExtraPuntoRef.current;
-        _res.push({ lance: "Punto", quien: r.quien, pts: r.pts || 2, info: "no quiero" });
+        _res.push({ lance: "Punto", quien: r.quien, pts: r.pts || 2, base: 1, apostado: 0, pqNo: 1 });
       } else {
         const vJ = puntosMano(mJ), vB = puntosMano(mB);
         const ganadorPunto = vJ > vB ? "jugador" : vJ < vB ? "bot" : (esManoJRef.current ? "jugador" : "bot");
@@ -740,7 +742,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
           setBoteBot(prev => prev + total);
           log(`Punto: bot gana ${total} (base 1${extra > 0 ? ` + ${extra} apostado` : ""}, tú ${vJ} vs Bot ${vB})`, "error");
         }
-        _res.push({ lance: "Punto", quien: ganadorPunto, pts: total, info: `tú ${vJ} vs bot ${vB}` });
+        _res.push({ lance: "Punto", quien: ganadorPunto, pts: total, base: 1, apostado: extra, pqNo: 0 });
         if (extraPunto && extraPunto.extra > 0 && extraPunto.quien !== ganadorPunto) {
           if (extraPunto.quien === "jugador") {
             setBoteJugador(prev => prev + extraPunto.extra);
@@ -757,7 +759,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
     if (jTieneJuego || bTieneJuego) {
       if (apuestaExtraJuegoRef.current?.resuelto) {
         const r = apuestaExtraJuegoRef.current;
-        _res.push({ lance: "Juego", quien: r.quien, pts: r.pts || 0, info: "no quiero" });
+        _res.push({ lance: "Juego", quien: r.quien, pts: r.pts || 0, base: (r.pts || 1) - 1, apostado: 0, pqNo: 1 });
       } else {
         const extraJuego = apuestaExtraJuegoRef.current;
         let ganadorJuego, ptsBase;
@@ -779,7 +781,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
           setBoteBot(prev => prev + total);
           log(`Juego: bot gana ${total} (base ${ptsBase}${extra > 0 ? ` + ${extra} apostado` : ""})`, "error");
         }
-        _res.push({ lance: "Juego", quien: ganadorJuego, pts: total, info: extra > 0 ? `base ${ptsBase} + ${extra} ap.` : `base ${ptsBase}` });
+        _res.push({ lance: "Juego", quien: ganadorJuego, pts: total, base: ptsBase, apostado: extra, pqNo: 0 });
         if (extraJuego && extraJuego.extra > 0 && extraJuego.quien !== ganadorJuego) {
           if (extraJuego.quien === "jugador") {
             setBoteJugador(prev => prev + extraJuego.extra);
@@ -1088,15 +1090,22 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
             RESUMEN DE LA MANO
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {resumenMano.map(({ lance, quien, pts, info }, idx) => (
-              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 16 }}>
-                <span style={{ color: "gold", minWidth: 52, flexShrink: 0 }}>{lance}</span>
-                <span style={{ fontWeight: 700, color: quien === "jugador" ? "#80d8a0" : "#e8a0a0" }}>
-                  {quien === "jugador" ? "Tú" : "Bot"} +{pts}
-                </span>
-                {info && <span style={{ fontSize: 14, color: "orangered" }}>{info}</span>}
-              </div>
-            ))}
+            {resumenMano.map(({ lance, quien, pts, base, apostado, pqNo }, idx) => {
+              const partes = [];
+              if (base > 0 && (apostado > 0 || pqNo || base > 1)) partes.push(`base ${base}`);
+              if (apostado > 0) partes.push(`apostado ${apostado}`);
+              if (pqNo) partes.push("porque no");
+              const desglose = partes.length > 0 ? partes.join(" + ") : "en paso";
+              return (
+                <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 16 }}>
+                  <span style={{ color: "gold", minWidth: 52, flexShrink: 0 }}>{lance}</span>
+                  <span style={{ fontWeight: 700, color: quien === "jugador" ? "#80d8a0" : "#e8a0a0" }}>
+                    {quien === "jugador" ? "Tú" : "Bot"} +{pts}
+                  </span>
+                  <span style={{ fontSize: 13, color: "#b8900a" }}>({desglose})</span>
+                </div>
+              );
+            })}
           </div>
           <div style={{ marginTop: 8, paddingTop: 7, borderTop: "1px solid rgba(180,140,60,0.15)", display: "flex", justifyContent: "space-between", fontSize: 16 }}>
             <span style={{ color: "#a08050" }}>Total mano:</span>
