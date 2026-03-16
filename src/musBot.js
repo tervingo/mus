@@ -180,6 +180,8 @@ function buildObs(gameState) {
 let session = null;
 
 export async function initDQN(modelUrl = '/mus_dqn.onnx') {
+  const info = await fetch('/mus_model_info.json').then(r => r.json());
+  console.log('DQN cargado:', info.model, '| win rate:', info.win_rate_heuristica);
   if (session) return;
   try {
     session = await ort.InferenceSession.create(modelUrl);
