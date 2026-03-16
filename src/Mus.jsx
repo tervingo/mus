@@ -299,6 +299,9 @@ export default function Mus() {
   const [apuestaExtraPunto, setApuestaExtraPunto] = useState(null); // {quien, extra}
   // Resumen del conteo al final de cada mano
   const [resumenMano, setResumenMano] = useState([]);
+  const [estadoLances, setEstadoLances] = useState({
+    grande: null, chica: null, pares: null, juego: null, punto: null
+  }); // null = pendiente, {tipo: 'paso'|'envidada'|'no_querida', pts, quien}
 
   // Refs para evitar stale closures en callbacks async
   const manoJRef = useRef([]);
@@ -384,6 +387,7 @@ export default function Mus() {
     setGrandeApostado(false);
     setChicaApostado(false);
     setResumenMano([]);
+    setEstadoLances({ grande: null, chica: null, pares: null, juego: null, punto: null });
     grandeResultadoRef.current = null;
     chicaResultadoRef.current = null;
     log("🃏 Cartas repartidas. ¿Mus o no hay mus?", "sistema");
@@ -555,6 +559,11 @@ Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede 
   // ── APUESTAS ─────────────────────────────────────────────────────────────────
 
   // Jugador pasa — bot responde (puede pasar o abrir)
+  // Actualiza el estado visual de un lance
+  const actualizarLance = useCallback((lance, tipo, pts = null, quien = null) => {
+    setEstadoLances(prev => ({ ...prev, [lance]: { tipo, pts, quien } }));
+  }, []);
+
   // Bot abre la apuesta cuando es mano (habla primero)
   const botAbreApuesta = useCallback(async () => {
     const tipo = faseApuestaRef.current;
@@ -675,6 +684,7 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
         if (tipo === "chica") chicaResultadoRef.current = { quien: "jugador", pts: 1 };
       }
       setApuestaAbierta(null);
+      setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: 1, quien: 'jugador' } }));
       avanzarFase(tipo);
     }
   };
@@ -711,6 +721,7 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
       if (tipo === "chica") chicaResultadoRef.current = { quien: "bot", pts: 1 };
     }
     setApuestaAbierta(null);
+    setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: 1, quien: 'bot' } }));
     avanzarFase(tipo);
   };
 
@@ -759,6 +770,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
         if (tipo === "chica") chicaResultadoRef.current = { quien: "jugador", pts: 1 };
       }
       setApuestaAbierta(null);
+      setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: 1, quien: 'jugador' } }));
       avanzarFase(tipo);
     }
   };
@@ -824,6 +836,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
       }
     }
     setApuestaAbierta(null);
+    setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'envidada', pts: cant, quien: jugGana ? 'jugador' : 'bot' } }));
     avanzarFase(tipo);
   };
 
@@ -981,6 +994,11 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
   // ── AVANZAR FASE ─────────────────────────────────────────────────────────────
   const avanzarFase = useCallback(async (tipoActual) => {
     setBotPaso(false);
+    // Marcar el lance actual como "paso" si no tiene ya un estado
+    setEstadoLances(prev => ({
+      ...prev,
+      [tipoActual]: prev[tipoActual] || { tipo: 'paso' }
+    }));
     const orden = ["grande", "chica", "pares", "juego"];
     const idx = orden.indexOf(tipoActual);
     if (tipoActual === "punto" || idx >= orden.length - 1) {
@@ -1227,7 +1245,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
   return (
     <div style={fondo}>
       {/* Cabecera */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", maxWidth: 680 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", maxWidth: 900 }}>
         <p style={{ ...titulo, fontSize: "clamp(1.1rem,3.2vw,1.8rem)", flex: 1, margin: 0 }}>🂡 MUS</p>
         <div style={{ fontSize: 14, color: "#F6C90E99", fontWeight: 700, letterSpacing: "0.1em" }}>
           {etiquetaFase}
@@ -1242,8 +1260,69 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
         ))}
       </div>
 
+      {/* Layout: panel lances + tablero principal */}
+      <div style={{ display: "flex", gap: 14, width: "100%", maxWidth: 900, alignItems: "flex-start" }}>
+
+        {/* Panel de estado de lances */}
+        <div style={{
+          ...panel,
+          minWidth: 140, maxWidth: 160,
+          padding: "12px 10px",
+          display: "flex", flexDirection: "column", gap: 6,
+          flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 14, color: "redOrange", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 4 }}>LANCES</div>
+          {["grande", "chica", "pares", "juego", "punto"].map(lance => {
+            const e = estadoLances[lance];
+            const esFaseActual = faseApuesta === lance || (fase === "apuesta" && faseApuesta === lance);
+            const faseActiva = ["declarar_pares", "pares"].includes(fase) && lance === "pares"
+              || ["declarar_juego", "juego"].includes(fase) && lance === "juego"
+              || fase === "apuesta" && faseApuesta === lance;
+            let icono = "·";
+            let color = "#4a3820";
+            let texto = lance.charAt(0).toUpperCase() + lance.slice(1);
+            let subtexto = null;
+            if (faseActiva) {
+              icono = "▶";
+              color = "#F6C90E";
+            } else if (e) {
+              if (e.tipo === "paso") {
+                icono = "—";
+                color = "#6a7a90";
+                subtexto = "paso";
+              } else if (e.tipo === "envidada") {
+                icono = "✓";
+                color = e.quien === "jugador" ? "#2d9e60" : "#e63946";
+                subtexto = `${e.pts} pts → ${e.quien === "jugador" ? "tú" : "bot"}`;
+              } else if (e.tipo === "no_querida") {
+                icono = "✗";
+                color = e.quien === "jugador" ? "#2d9e60" : "#e63946";
+                subtexto = `no querida (+1 → ${e.quien === "jugador" ? "tú" : "bot"})`;
+              }
+            }
+            return (
+              <div key={lance} style={{
+                padding: "5px 7px", borderRadius: 6,
+                background: faseActiva ? "rgba(246,201,14,0.08)" : "transparent",
+                border: faseActiva ? "1px solid #F6C90E33" : "1px solid transparent",
+              }}>
+                <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                  <span style={{ fontSize: 14, color, fontWeight: 700, minWidth: 10 }}>{icono}</span>
+                  <span style={{ fontSize: 16, color: faseActiva ? "#F6C90E" : e ? color : "#5a4830", fontWeight: faseActiva ? 700 : 400 }}>{texto}</span>
+                </div>
+                {subtexto && (
+                  <div style={{ fontSize: 14, color, marginLeft: 15, marginTop: 1 }}>{subtexto}</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Tablero principal */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+
       {/* Mano bot */}
-      <div style={{ ...panel, width: "100%", maxWidth: 680 }}>
+      <div style={{ ...panel, width: "100%" }}>
         <div style={{ fontSize: 11, color: "#7a6030", marginBottom: 10, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
           <span>MANO DEL BOT{!esManoJugador && <span style={{ color: "#a080c0", fontWeight: 700, marginLeft: 8 }}>(mano)</span>}</span>
           {mostrarBotCartas && (
@@ -1266,7 +1345,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
 
       {/* Log */}
       <div style={{
-        ...panel, width: "100%", maxWidth: 680,
+        ...panel, width: "100%",
         maxHeight: 120, overflowY: "auto",
         display: "flex", flexDirection: "column", gap: 3
       }} ref={el => { if (el) el.scrollTop = el.scrollHeight; }}>
@@ -1283,7 +1362,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
       </div>
 
       {/* Mano jugador */}
-      <div style={{ ...panel, width: "100%", maxWidth: 680 }}>
+      <div style={{ ...panel, width: "100%" }}>
         <div style={{ fontSize: 14, color: "#7a6030", marginBottom: 10, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
           <span>TU MANO{esManoJugador && <span style={{ color: "#a080c0", fontWeight: 700, marginLeft: 8 }}>(mano)</span>}</span>
           {infoManoJ && <span style={{ color: "#F6C90Eaa" }}>{infoManoJ}</span>}
@@ -1300,7 +1379,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
 
       {/* Resumen de mano */}
       {fase === "puntos" && resumenMano.length > 0 && (
-        <div style={{ ...panel, width: "100%", maxWidth: 680, border: "1px solid #F6C90E44" }}>
+        <div style={{ ...panel, width: "100%", border: "1px solid #F6C90E44" }}>
           <div style={{ fontSize: 14, color: "#F6C90Ecc", fontWeight: 700, letterSpacing: "0.12em", marginBottom: 10 }}>
             RESUMEN DE LA MANO
           </div>
@@ -1334,7 +1413,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
       )}
 
       {/* Controles */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", width: "100%", maxWidth: 680 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center", width: "100%" }}>
         {esperandoBot && (
           <div style={{ ...panel, padding: "10px 20px", color: "#a08050", fontSize: 13, width: "100%", textAlign: "center" }}>
             ⏳ El bot está pensando...
@@ -1450,6 +1529,9 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
           )}
         </div>
       )}
+
+        </div> {/* fin tablero principal */}
+      </div> {/* fin layout lances + tablero */}
     </div>
   );
 }
