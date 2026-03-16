@@ -282,7 +282,8 @@ export default function Mus() {
   const [esperandoBot, setEsperandoBot] = useState(false);
   const [apuestaAbierta, setApuestaAbierta] = useState(null);
   const [botPaso, setBotPaso] = useState(false); // el bot es mano y ya pasó
-  const [botPidioMus, setBotPidioMus] = useState(false); // el bot es mano y pidió mus
+  const [botPidioMus, setBotPidioMus] = useState(false);
+  const botMusDecididoRef = useRef(false); // evita que botDecideMus se llame dos veces
   const [declaracionJugador, setDeclaracionJugador] = useState(null);
   const [declaracionBot, setDeclaracionBot] = useState(null);
   const [historial, setHistorial] = useState([]);
@@ -371,6 +372,7 @@ export default function Mus() {
     setApuestaAbierta(null);
     setBotPaso(false);
     setBotPidioMus(false);
+    botMusDecididoRef.current = false;
     setDeclaracionJugador(null);
     setDeclaracionBot(null);
     setFaseApuesta("grande");
@@ -432,8 +434,12 @@ Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
   }, [log]);
 
   useEffect(() => {
-    if (fase === "mus" && !musRechazado && !esManoJugador) {
+    if (fase === "mus" && !musRechazado && !esManoJugador && !botMusDecididoRef.current) {
+      botMusDecididoRef.current = true;
       botDecideMus();
+    }
+    if (fase !== "mus") {
+      botMusDecididoRef.current = false;
     }
   }, [fase, musRechazado]);
 
@@ -514,11 +520,13 @@ Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede 
     const baraja2 = barajar(crearBaraja());
     let idx2 = 0;
     const nuevasB = manoB.map((c, i) => indices.includes(i) ? baraja2[idx2++] : c);
-    log(`Bot: Descarta ${indices.length}${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+    log(`Bot: Descarta ${indices.length}`, "bot");
     setManoJugador(nuevasJ);
     setManoBot(nuevasB);
     setCartasSeleccionadas([]);
     setMusRechazado(false);
+    setBotPidioMus(false);
+    botMusDecididoRef.current = false;
     setFase("mus");
     log("¿Otra vez mus?", "sistema");
   };
@@ -526,6 +534,8 @@ Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede 
   const noDescartar = () => {
     setCartasSeleccionadas([]);
     log("Tú: No descartas nada", "jugador");
+    setBotPidioMus(false);
+    botMusDecididoRef.current = false;
     setFase("mus");
   };
 
