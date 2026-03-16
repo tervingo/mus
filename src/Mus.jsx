@@ -266,6 +266,8 @@ export default function Mus() {
   const [fase, setFase] = useState("inicio");
   const [faseApuesta, setFaseApuesta] = useState("grande");
   const [modoDQN, setModoDQN] = useState(false);
+  const modoDQNRef = useRef(false);
+  useEffect(() => { modoDQNRef.current = modoDQN; }, [modoDQN]);
   const [manoJugador, setManoJugador] = useState([]);
   const [manoBot, setManoBot] = useState([]);
   const [cartasSeleccionadas, setCartasSeleccionadas] = useState([]);
@@ -334,7 +336,7 @@ export default function Mus() {
 
   // Wrapper: elige entre Claude y DQN según modoDQN
   const botDecide = useCallback(async (prompt, gameStateOverride = null) => {
-    if (modoDQN) {
+    if (modoDQNRef.current) {
       const gs = gameStateOverride || {
         manoJugador: manoBRef.current,   // perspectiva del bot = manoBot
         fase: faseApuestaRef.current,
@@ -399,7 +401,7 @@ export default function Mus() {
     setEsperandoBot(true);
     const manoB = manoBRef.current;
     let quiere;
-    if (modoDQN) {
+    if (modoDQNRef.current) {
       // Heurística: acepta mus si la mano es débil en grande o chica o no tiene pares/juego
       const fG = fuerzaGrande(manoB);
       const fC = fuerzaChica(manoB);
@@ -448,7 +450,7 @@ if (quiere) {
     setEsperandoBot(true);
     const manoB = manoBRef.current;
     let indices;
-    if (modoDQN) {
+    if (modoDQNRef.current) {
       // Heurística: descarta las 2 peores cartas para grande (las de menor rangoGrande)
       // salvo si tiene juego o pares, en cuyo caso no descarta nada
       if (tieneJuego(manoB) || tienePareja(manoB)) {
@@ -944,7 +946,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
       log("── PARES: ¿Tienes pares? ──", "sistema");
       const manoB = manoBRef.current;
       const tienePB = tienePareja(manoB);
-      if (!modoDQN) {
+      if (!modoDQNRef.current) {
         setEsperandoBot(true);
         const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
 Tienes que declarar si llevas pares. Tus pares: ${tienePB || "ninguno"}.
@@ -969,7 +971,7 @@ if (siguiente === "juego") {
       log("── JUEGO: ¿Tienes juego? ──", "sistema");
       const manoB = manoBRef.current;
       const tieneJB = tieneJuego(manoB);
-      if (!modoDQN) {
+      if (!modoDQNRef.current) {
         setEsperandoBot(true);
         const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
 Tienes que declarar si llevas juego (31+ puntos). Tus puntos: ${puntosMano(manoB)}.
@@ -1114,7 +1116,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
           <p style={{ color: "#8a7050", fontSize: 15, lineHeight: 1.7, margin: 0 }}>
             El clásico juego de cartas vasco. Grande · Chica · Pares · Juego.<br />
             <strong style={{ color: "#a89060" }}>Primera a 40 piedras gana.</strong><br />
-            <span style={{ fontSize: 13, color: "#6a5030" }}>El bot usa IA para razonar sus jugadas.</span>
+            <span style={{ fontSize: 14, color: "green" }}>El bot usa IA para razonar sus jugadas.</span>
           </p>
           {ganador && (
             <div style={{
@@ -1158,7 +1160,7 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
               ⚡ Bot DQN
             </button>
           </div>
-          <p style={{ fontSize: 12, color: "#6a5030", margin: 0 }}>
+          <p style={{ fontSize: 14, color: "redOrange", margin: 0 }}>
             {modoDQN ? "Bot DQN: red neuronal entrenada por self-play (rápido, sin API)" : "Bot Claude: IA con razonamiento en lenguaje natural"}
           </p>
         </div>
