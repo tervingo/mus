@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { initDQN, dqnDecide, getLegalActions } from './musBot.js';
 
 // ── CONSTANTES ────────────────────────────────────────────────────────────────
 const PALOS = ["oros", "copas", "espadas", "bastos"];
@@ -188,6 +189,20 @@ ESTRATEGIA:
   }
 }
 
+// ── IA CON DQN ────────────────────────────────────────────────────────────────
+async function consultarDQN(gameState) {
+  try {
+    const legal = getLegalActions(gameState.faseApuesta, gameState.apuestaAbierta);
+    const accion = await dqnDecide(gameState, legal);
+    if (!accion) return null;
+    // Devuelve el mismo formato que consultarIA
+    return { accion };
+  } catch (e) {
+    console.error("Error DQN:", e);
+    return null;
+  }
+}
+
 // ── COMPONENTE CARTA ──────────────────────────────────────────────────────────
 // Las imágenes deben estar en public/cartas/{valor}_{palo}.png
 // Ejemplo: public/cartas/1_oros.png, public/cartas/12_bastos.png, etc.
@@ -250,6 +265,7 @@ function Carta({ carta, oculta = false, seleccionada = false, onClick = null }) 
 export default function Mus() {
   const [fase, setFase] = useState("inicio");
   const [faseApuesta, setFaseApuesta] = useState("grande");
+  const [modoDQN, setModoDQN] = useState(false);
   const [manoJugador, setManoJugador] = useState([]);
   const [manoBot, setManoBot] = useState([]);
   const [cartasSeleccionadas, setCartasSeleccionadas] = useState([]);
@@ -263,6 +279,7 @@ export default function Mus() {
   const [ganador, setGanador] = useState(null);
   const [esperandoBot, setEsperandoBot] = useState(false);
   const [apuestaAbierta, setApuestaAbierta] = useState(null);
+  const [botPaso, setBotPaso] = useState(false); // el bot es mano y ya pasó
   const [declaracionJugador, setDeclaracionJugador] = useState(null);
   const [declaracionBot, setDeclaracionBot] = useState(null);
   const [historial, setHistorial] = useState([]);
@@ -310,6 +327,30 @@ export default function Mus() {
   const grandeResultadoRef = useRef(null);
   const chicaResultadoRef = useRef(null);
 
+  // Inicializar DQN una sola vez al montar el componente
+  useEffect(() => {
+    initDQN();
+  }, []);
+
+  // Wrapper: elige entre Claude y DQN según modoDQN
+  const botDecide = useCallback(async (prompt, gameStateOverride = null) => {
+    if (modoDQN) {
+      const gs = gameStateOverride || {
+        manoJugador: manoBRef.current,   // perspectiva del bot = manoBot
+        fase: faseApuestaRef.current,
+        faseApuesta: faseApuestaRef.current,
+        esManoJugador: !esManoJRef.current, // bot es mano si jugador NO es mano
+        puntosJugador: ptBRef.current,      // desde perspectiva del bot
+        puntosBot: ptJRef.current,
+        apuestaAbierta: null,               // se pasa explícitamente si hace falta
+        declaracionBot: null,
+      };
+      return consultarDQN(gs);
+    }
+    return consultarIA(prompt);
+  }, [modoDQN]);
+
+
   const log = useCallback((msg, tipo = "info") => {
     setMensajes(prev => [...prev.slice(-30), { msg, tipo, id: Date.now() + Math.random() }]);
   }, []);
@@ -325,6 +366,7 @@ export default function Mus() {
     setBoteJugador(0);
     setBoteBot(0);
     setApuestaAbierta(null);
+    setBotPaso(false);
     setDeclaracionJugador(null);
     setDeclaracionBot(null);
     setFaseApuesta("grande");
@@ -356,17 +398,28 @@ export default function Mus() {
     log("Tú: Mus", "jugador");
     setEsperandoBot(true);
     const manoB = manoBRef.current;
-    const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
+    let quiere;
+    if (modoDQN) {
+      // Heurística: acepta mus si la mano es débil en grande o chica o no tiene pares/juego
+      const fG = fuerzaGrande(manoB);
+      const fC = fuerzaChica(manoB);
+      const malaGrande = fG === "débil" || fG === "muy débil";
+      const malaChica  = fC === "débil" || fC === "muy débil";
+      quiere = malaGrande || malaChica || !tienePareja(manoB);
+      setEsperandoBot(false);
+    } else {
+      const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
 El rival pide mus. ¿Aceptas? Considera si tu mano es mejorable.
 Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
-    setEsperandoBot(false);
-    const quiere = resp ? resp.quiereMus : Math.random() > 0.35;
-    if (quiere) {
-      log(`Bot: Mus ✓${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+      setEsperandoBot(false);
+      quiere = resp ? resp.quiereMus : Math.random() > 0.35;
+    }
+if (quiere) {
+      log(`Bot: Mus ✓`, "bot");
       setFase("descarte");
       log("Selecciona cartas a descartar y pulsa 'Descartar'", "sistema");
     } else {
-      log(`Bot: No hay mus${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+      log(`Bot: No hay mus`, "bot");
       setMusRechazado(true);
       setFaseApuesta("grande");
       setFase("apuesta");
@@ -394,12 +447,27 @@ Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
     log(`Tú: Descartas ${cartasSeleccionadas.length} carta(s)`, "jugador");
     setEsperandoBot(true);
     const manoB = manoBRef.current;
-    const resp = await consultarIA(`Tu mano (índices 0-3): ${manoATexto(manoB)}.
+    let indices;
+    if (modoDQN) {
+      // Heurística: descarta las 2 peores cartas para grande (las de menor rangoGrande)
+      // salvo si tiene juego o pares, en cuyo caso no descarta nada
+      if (tieneJuego(manoB) || tienePareja(manoB)) {
+        indices = [];
+      } else {
+        const ordenadas = manoB
+          .map((c, i) => ({ i, r: rangoGrande(c.valor) }))
+          .sort((a, b) => a.r - b.r);
+        indices = ordenadas.slice(0, 2).map(x => x.i);
+      }
+      setEsperandoBot(false);
+    } else {
+      const resp = await consultarIA(`Tu mano (índices 0-3): ${manoATexto(manoB)}.
 Para grande quieres cartas ALTAS (R/3>C>S>7>6>5>4>A/2). Para chica quieres cartas BAJAS (A/2<4<5<6<7<S<C<R/3). Para pares quieres repeticiones. Para juego quieres suma ≥31 pts.
 ¿Qué índices de carta descartarías? Considera qué lances tienes más opciones de ganar y optimiza para ellos.
 Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede ser vacía], "razon": "breve"}`);
-    setEsperandoBot(false);
-    const indices = resp?.indicesToDescartar?.filter(i => i >= 0 && i < 4) || [];
+      setEsperandoBot(false);
+      indices = resp?.indicesToDescartar?.filter(i => i >= 0 && i < 4) || [];
+    }
     const baraja2 = barajar(crearBaraja());
     let idx2 = 0;
     const nuevasB = manoB.map((c, i) => indices.includes(i) ? baraja2[idx2++] : c);
@@ -434,15 +502,61 @@ Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede 
   // ── APUESTAS ─────────────────────────────────────────────────────────────────
 
   // Jugador pasa — bot responde (puede pasar o abrir)
+  // Bot abre la apuesta cuando es mano (habla primero)
+  const botAbreApuesta = useCallback(async () => {
+    const tipo = faseApuestaRef.current;
+    const manoB = manoBRef.current;
+    setEsperandoBot(true);
+    const resp = await botDecide(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
+Eres el MANO, hablas primero. Marcador: tú ${boteBRef.current + ptBRef.current}, rival ${boteJRef.current + ptJRef.current} piedras.
+¿Abres la apuesta o pasas?
+JSON: {"accion": "paso"|"envido", "cantidad": 2/4/999, "razon": "breve"}`, {
+      manoJugador: manoB,
+      fase: tipo, faseApuesta: tipo,
+      esManoJugador: true,  // el bot ES mano
+      puntosJugador: ptBRef.current, puntosBot: ptJRef.current,
+      apuestaAbierta: null, declaracionBot: null,
+    });
+    setEsperandoBot(false);
+    if (!resp || resp.accion === "paso") {
+      log(`Bot: Paso${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+      setBotPaso(true);
+    } else {
+      const c = resp.cantidad === 999 ? 999 : (resp.cantidad >= 4 ? 4 : 2);
+      log(`Bot: ${c === 999 ? "Órdago" : `Envido (${c})`}${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+      if (tipo === "grande") setGrandeApostado(true);
+      if (tipo === "chica") setChicaApostado(true);
+      setApuestaAbierta({ cantidad: c, quien: "bot" });
+    }
+  }, [botDecide, contextoApuesta]);
+
+  // Cuando entra en fase apuesta y el bot es mano, el bot habla primero
+  useEffect(() => {
+    if (fase === "apuesta" && !apuestaAbierta && !esManoJugador) {
+      botAbreApuesta();
+    }
+  }, [fase, faseApuesta]);
+
   const jugadorPasa = async () => {
     log("Tú: Paso", "jugador");
+    if (botPaso) {
+      setBotPaso(false);
+      avanzarFase(faseApuestaRef.current);
+      return;
+    }
     setEsperandoBot(true);
     const tipo = faseApuestaRef.current;
     const manoB = manoBRef.current;
-    const resp = await consultarIA(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
+    const resp = await botDecide(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
 El rival ha pasado. Marcador: tú ${boteBRef.current + ptBRef.current}, rival ${boteJRef.current + ptJRef.current} piedras.
 ¿Abres la apuesta o también pasas?
-JSON: {"accion": "paso"|"envido", "cantidad": 2/4/999, "razon": "breve"}`);
+JSON: {"accion": "paso"|"envido", "cantidad": 2/4/999, "razon": "breve"}`, {
+      manoJugador: manoB,
+      fase: tipo, faseApuesta: tipo,
+      esManoJugador: !esManoJRef.current,
+      puntosJugador: ptBRef.current, puntosBot: ptJRef.current,
+      apuestaAbierta: null, declaracionBot: null,
+    });
     setEsperandoBot(false);
     if (!resp || resp.accion === "paso") {
       log(`Bot: Paso${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
@@ -464,10 +578,16 @@ JSON: {"accion": "paso"|"envido", "cantidad": 2/4/999, "razon": "breve"}`);
     if (tipo === "grande") setGrandeApostado(true);
     if (tipo === "chica") setChicaApostado(true);
     const manoB = manoBRef.current;
-    const resp = await consultarIA(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
+    const resp = await botDecide(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
 El rival ${cantidad === 999 ? "ha tirado un órdago" : `ha enviado ${cantidad} piedras`}. Marcador: tú ${boteBRef.current + ptBRef.current}, rival ${boteJRef.current + ptJRef.current} piedras.
 IMPORTANTE: si no quieres, el rival solo gana 1 piedra ("porque no"), no las apostadas. Si quieres, se comparan manos y gana el mejor.
-JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo total, "razon": "breve"}`);
+JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo total, "razon": "breve"}`, {
+      manoJugador: manoB,
+      fase: tipo, faseApuesta: tipo,
+      esManoJugador: !esManoJRef.current,
+      puntosJugador: ptBRef.current, puntosBot: ptJRef.current,
+      apuestaAbierta: { cantidad, quien: "jugador" }, declaracionBot: null,
+    });
     setEsperandoBot(false);
     if (!resp || resp.accion === "quiero") {
       log(`Bot: Quiero${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
@@ -547,9 +667,15 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
     setEsperandoBot(true);
     const tipo = faseApuestaRef.current;
     const manoB = manoBRef.current;
-    const resp = await consultarIA(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
+    const resp = await botDecide(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
 El rival ha subido la apuesta a ${nueva} piedras. Si no quieres, el rival gana 1 piedra "porque no". ¿Aceptas?
-JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
+JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
+      manoJugador: manoB,
+      fase: tipo, faseApuesta: tipo,
+      esManoJugador: !esManoJRef.current,
+      puntosJugador: ptBRef.current, puntosBot: ptJRef.current,
+      apuestaAbierta: { cantidad: nueva, quien: "jugador" }, declaracionBot: null,
+    });
     setEsperandoBot(false);
     if (!resp || resp.accion === "quiero") {
       log(`Bot: Quiero${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
@@ -801,6 +927,7 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
 
   // ── AVANZAR FASE ─────────────────────────────────────────────────────────────
   const avanzarFase = useCallback(async (tipoActual) => {
+    setBotPaso(false);
     const orden = ["grande", "chica", "pares", "juego"];
     const idx = orden.indexOf(tipoActual);
     if (tipoActual === "punto" || idx >= orden.length - 1) {
@@ -811,46 +938,56 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`);
     setFaseApuesta(siguiente);
 
     if (siguiente === "pares") {
-      // Fase de declaración
       setDeclaracionJugador(null);
       setDeclaracionBot(null);
       setFase("declarar_pares");
       log("── PARES: ¿Tienes pares? ──", "sistema");
-      // Bot declara con IA
-      setEsperandoBot(true);
       const manoB = manoBRef.current;
       const tienePB = tienePareja(manoB);
-      const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
+      if (!modoDQN) {
+        setEsperandoBot(true);
+        const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
 Tienes que declarar si llevas pares. Tus pares: ${tienePB || "ninguno"}.
 REGLA IMPORTANTE: en el mus la declaración es OBLIGATORIAMENTE honesta. Si tienes pares DEBES declarar que los tienes. Si no tienes, DEBES decir que no tienes. No se puede mentir.
 JSON: {"declarar": ${tienePB !== null ? "true (tienes pares, debes declarar)" : "false (no tienes pares)"}, "razon": "breve"}`);
-      setEsperandoBot(false);
-      const declara = tienePB !== null; // Siempre honesto, ignoramos resp.declarar
-      log(`Bot: ${declara ? "Tengo pares" : "No tengo pares"}${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
-      setDeclaracionBot(declara ? "si" : "no");
+        setEsperandoBot(false);
+        const declara = tienePB !== null;
+        log(`Bot: ${declara ? "Tengo pares" : "No tengo pares"}${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+        setDeclaracionBot(declara ? "si" : "no");
+      } else {
+        const declara = tienePB !== null;
+        log(`Bot: ${declara ? "Tengo pares" : "No tengo pares"}`, "bot");
+        setDeclaracionBot(declara ? "si" : "no");
+      }
       return;
     }
 
-    if (siguiente === "juego") {
+if (siguiente === "juego") {
       setDeclaracionJugador(null);
       setDeclaracionBot(null);
       setFase("declarar_juego");
       log("── JUEGO: ¿Tienes juego? ──", "sistema");
-      setEsperandoBot(true);
       const manoB = manoBRef.current;
       const tieneJB = tieneJuego(manoB);
-      const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
+      if (!modoDQN) {
+        setEsperandoBot(true);
+        const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
 Tienes que declarar si llevas juego (31+ puntos). Tus puntos: ${puntosMano(manoB)}.
 REGLA IMPORTANTE: la declaración es OBLIGATORIAMENTE honesta. Si tienes 31+ puntos DEBES declarar juego. Si no, DEBES decir que no tienes.
 JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (no tienes juego)"}, "razon": "breve"}`);
-      setEsperandoBot(false);
-      const declara = tieneJB; // Siempre honesto, ignoramos resp.declarar
-      log(`Bot: ${declara ? "Tengo juego" : "No tengo juego"}${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
-      setDeclaracionBot(declara ? "si" : "no");
+        setEsperandoBot(false);
+        const declara = tieneJB;
+        log(`Bot: ${declara ? "Tengo juego" : "No tengo juego"}${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
+        setDeclaracionBot(declara ? "si" : "no");
+      } else {
+        const declara = tieneJB;
+        log(`Bot: ${declara ? "Tengo juego" : "No tengo juego"}`, "bot");
+        setDeclaracionBot(declara ? "si" : "no");
+      }
       return;
     }
 
-    // Grande y chica van directo
+  // Grande y chica van directo
     setTimeout(() => {
       setFase("apuesta");
       log(`── ${siguiente.toUpperCase()}: ¿Paso o envido? ──`, "sistema");
@@ -999,6 +1136,31 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
           <button style={{ ...mkBtn(), fontSize: 17, padding: "13px 38px" }} onClick={iniciar}>
             {ganador ? "♻️ Nueva partida" : "🎮 Comenzar partida"}
           </button>
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button
+              onClick={() => setModoDQN(false)}
+              style={{
+                ...mkBtn(),
+                fontSize: 13, padding: "8px 18px",
+                opacity: modoDQN ? 0.45 : 1,
+                border: modoDQN ? "1px solid #5a4030" : "2px solid #F6C90E",
+              }}>
+              🤖 Bot Claude
+            </button>
+            <button
+              onClick={() => setModoDQN(true)}
+              style={{
+                ...mkBtn(),
+                fontSize: 13, padding: "8px 18px",
+                opacity: modoDQN ? 1 : 0.45,
+                border: modoDQN ? "2px solid #F6C90E" : "1px solid #5a4030",
+              }}>
+              ⚡ Bot DQN
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: "#6a5030", margin: 0 }}>
+            {modoDQN ? "Bot DQN: red neuronal entrenada por self-play (rápido, sin API)" : "Bot Claude: IA con razonamiento en lenguaje natural"}
+          </p>
         </div>
       </div>
     );
@@ -1172,8 +1334,8 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
             <button style={mkBtn("#8090b0", true)} onClick={() => declarar("no")}>No tengo juego</button>
           </>)}
 
-          {/* APUESTA — sin apuesta abierta del bot */}
-          {fase === "apuesta" && !apuestaAbierta && (<>
+          {/* APUESTA — sin apuesta abierta: jugador habla si es mano, o si bot ya pasó */}
+          {fase === "apuesta" && !apuestaAbierta && (esManoJugador || botPaso) && (<>
             <button style={mkBtn("#6a7a90", true)} onClick={jugadorPasa}>Paso</button>
             <button style={mkBtn("#2d9e60")} onClick={() => jugadorEnvido(2)}>Envido (2)</button>
             <button style={mkBtn("#e88020")} onClick={() => jugadorEnvido(4)}>Envido (4)</button>
