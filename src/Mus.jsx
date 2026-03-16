@@ -282,6 +282,7 @@ export default function Mus() {
   const [esperandoBot, setEsperandoBot] = useState(false);
   const [apuestaAbierta, setApuestaAbierta] = useState(null);
   const [botPaso, setBotPaso] = useState(false); // el bot es mano y ya pasó
+  const [botPidioMus, setBotPidioMus] = useState(false); // el bot es mano y pidió mus
   const [declaracionJugador, setDeclaracionJugador] = useState(null);
   const [declaracionBot, setDeclaracionBot] = useState(null);
   const [historial, setHistorial] = useState([]);
@@ -369,6 +370,7 @@ export default function Mus() {
     setBoteBot(0);
     setApuestaAbierta(null);
     setBotPaso(false);
+    setBotPidioMus(false);
     setDeclaracionJugador(null);
     setDeclaracionBot(null);
     setFaseApuesta("grande");
@@ -396,6 +398,45 @@ export default function Mus() {
   };
 
   // ── MUS ─────────────────────────────────────────────────────────────────────
+  // Cuando fase=mus y bot es mano, el bot decide primero si quiere mus
+  const botDecideMus = useCallback(async () => {
+    const manoB = manoBRef.current;
+    const fG = fuerzaGrande(manoB);
+    const fC = fuerzaChica(manoB);
+    const malaGrande = fG === "débil" || fG === "muy débil";
+    const malaChica  = fC === "débil" || fC === "muy débil";
+    let quiere;
+    let razonBot = "";
+    if (modoDQNRef.current) {
+      quiere = malaGrande || malaChica || !tienePareja(manoB);
+    } else {
+      setEsperandoBot(true);
+      const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
+Eres el MANO. ¿Pides mus? Considera si tu mano es mejorable.
+Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
+      setEsperandoBot(false);
+      quiere = resp ? resp.quiereMus : (malaGrande || malaChica);
+      razonBot = resp?.razon || "";
+    }
+    if (quiere) {
+      log(`Bot: Mus${razonBot ? ` — ${razonBot}` : ""}`, "bot");
+      setBotPidioMus(true);
+      // Ahora el jugador decide si acepta
+    } else {
+      log(`Bot: No hay mus${razonBot ? ` — ${razonBot}` : ""}`, "bot");
+      setMusRechazado(true);
+      setFaseApuesta("grande");
+      setFase("apuesta");
+      log("── GRANDE: ¿Paso o envido? ──", "sistema");
+    }
+  }, [log]);
+
+  useEffect(() => {
+    if (fase === "mus" && !musRechazado && !esManoJugador) {
+      botDecideMus();
+    }
+  }, [fase, musRechazado]);
+
   const pedirMus = async () => {
     log("Tú: Mus", "jugador");
     setEsperandoBot(true);
@@ -1292,10 +1333,27 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
 
         {!esperandoBot && (<>
           {/* MUS */}
-          {fase === "mus" && !musRechazado && (<>
-            <button style={mkBtn()} onClick={pedirMus}>Mus</button>
-            <button style={mkBtn("#8090b0", true)} onClick={noHayMus}>No hay mus</button>
-          </>)}
+          {fase === "mus" && !musRechazado && !esperandoBot && (
+            esManoJugador ? (<>
+              <button style={mkBtn()} onClick={pedirMus}>Mus</button>
+              <button style={mkBtn("#8090b0", true)} onClick={noHayMus}>No hay mus</button>
+            </>) : botPidioMus ? (<>
+              <button style={mkBtn()} onClick={() => {
+                setBotPidioMus(false);
+                log("Tú: Mus ✓", "jugador");
+                setFase("descarte");
+                log("Selecciona cartas a descartar y pulsa 'Descartar'", "sistema");
+              }}>Mus ✓</button>
+              <button style={mkBtn("#8090b0", true)} onClick={() => {
+                setBotPidioMus(false);
+                log("Tú: No hay mus", "jugador");
+                setMusRechazado(true);
+                setFaseApuesta("grande");
+                setFase("apuesta");
+                log("── GRANDE: ¿Paso o envido? ──", "sistema");
+              }}>No hay mus</button>
+            </>) : null
+          )}
 
           {/* DESCARTE */}
           {fase === "descarte" && (<>
