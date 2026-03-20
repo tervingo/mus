@@ -1,287 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { heuristicDecide, getLegalActionsHeuristic,
+import { heuristicDecide,
          ACT_MUS, ACT_NO_HAY_MUS, ACT_DESCARTAR,
-         ACT_PASO, ACT_ENVIDO_2, ACT_ENVIDO_4, ACT_ORDAGO,
-         ACT_QUIERO, ACT_NO_QUIERO, ACT_SUBIR,
-         ACT_SEL_CARTA_0, ACT_SEL_CARTA_1, ACT_SEL_CARTA_2, ACT_SEL_CARTA_3
 } from './musHeuristic.js';
-// ── CONSTANTES ────────────────────────────────────────────────────────────────
-const PALOS = ["oros", "copas", "espadas", "bastos"];
-const VALORES = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12];
-const NOMBRES_VALOR = { 1: "As", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 10: "Sota", 11: "Caballo", 12: "Rey" };
-const PALO_EMOJI = { oros: "🟡", copas: "🔴", espadas: "⚔️", bastos: "🪵" };
-const PALO_COLOR = { oros: "#F6C90E", copas: "#E63946", espadas: "#5B9BD5", bastos: "#5A9E52" };
-
-// ── LÓGICA ────────────────────────────────────────────────────────────────────
-function crearBaraja() {
-  const b = [];
-  for (const p of PALOS) for (const v of VALORES) b.push({ palo: p, valor: v });
-  return b;
-}
-function barajar(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-function repartir() {
-  const b = barajar(crearBaraja());
-  return { jugador: b.slice(0, 4), bot: b.slice(4, 8) };
-}
-// En el mus: 3 equivale a Rey (valor 10 en grande/chica, y cuenta como Rey en pares)
-//            2 equivale a As (valor 1 en grande/chica, y cuenta como As en pares)
-function puntosValor(v) {
-  if (v === 3) return 10;       // 3 = Rey a efectos de puntos
-  if (v === 2) return 1;        // 2 = As a efectos de puntos (ya vale 1, pero explícito)
-  if (v >= 10) return 10;       // Sota, Caballo, Rey
-  return v;
-}
-function valorPares(v) {
-  if (v === 3 || v === 12) return 12;  // 3 y Rey son equivalentes
-  if (v === 2 || v === 1) return 1;    // 2 y As son equivalentes
-  return v;
-}
-function puntosMano(mano) { return mano.reduce((s, c) => s + puntosValor(c.valor), 0); }
-function tieneJuego(mano) { return puntosMano(mano) >= 31; }
-
-// 31 real: exactamente tres 7s y una Sota (7+7+7+10=31)
-function es31Real(mano) {
-  const sietes = mano.filter(c => c.valor === 7).length;
-  const sotas = mano.filter(c => c.valor === 10).length;
-  return sietes === 3 && sotas === 1;
-}
-
-function valorJuego(mano) {
-  const p = puntosMano(mano);
-  if (!tieneJuego(mano)) return 0;
-  if (es31Real(mano)) return 10000;  // 31 real gana a todo
-  if (p === 31) return 9999;
-  if (p === 32) return 9998;
-  return p;
-}
-// Orden de cartas para grande y chica
-// R(12)/3 y A(1)/2 son equivalentes entre sí
-function rangoGrande(v) {
-  // Mayor rango = mejor para grande
-  if (v === 12 || v === 3) return 8;  // R/3 mejores
-  if (v === 11) return 7;             // C
-  if (v === 10) return 6;             // S
-  if (v === 7)  return 5;
-  if (v === 6)  return 4;
-  if (v === 5)  return 3;
-  if (v === 4)  return 2;
-  if (v === 1 || v === 2) return 1;   // A/2 peores
-  return 0;
-}
-function rangoChica(v) {
-  // Mayor rango = peor para chica (queremos los menores)
-  return rangoGrande(v); // mismo orden, pero comparamos al revés
-}
-
-// Compara dos manos carta a carta para grande (desc) o chica (asc)
-// Devuelve 1 si manoA gana, -1 si manoB gana, 0 si empate (gana mano = jugador)
-function compararManos(manoA, manoB, tipo) {
-  const rankFn = tipo === "grande" ? rangoGrande : rangoChica;
-  const sortDir = tipo === "grande" ? 1 : -1; // grande: desc (mayor primero), chica: asc (menor primero)
-  const sortedA = [...manoA].sort((a, b) => sortDir * (rankFn(b.valor) - rankFn(a.valor)));
-  const sortedB = [...manoB].sort((a, b) => sortDir * (rankFn(b.valor) - rankFn(a.valor)));
-  for (let i = 0; i < 4; i++) {
-    const rA = rankFn(sortedA[i].valor);
-    const rB = rankFn(sortedB[i].valor);
-    if (rA !== rB) return tipo === "grande" ? (rA > rB ? 1 : -1) : (rA < rB ? 1 : -1);
-  }
-  return 0; // empate → gana mano (jugador)
-}
-
-function tienePareja(mano) {
-  const g = {};
-  for (const c of mano) { const k = valorPares(c.valor); g[k] = (g[k] || 0) + 1; }
-  const counts = Object.values(g).sort((a, b) => b - a);
-  if (counts[0] >= 4) return "duples";                              // RRRR = duples (pareja doble)
-  if (counts[0] >= 3) return "medias";                              // 3 iguales = medias (2 pts)
-  if (counts[0] >= 2 && (counts[1] || 0) >= 2) return "duples";   // 2 parejas distintas = duples (3 pts)
-  if (counts[0] >= 2) return "pareja";                              // 1 pareja (1 pt)
-  return null;
-}
-function valorPareja(mano) {
-  const g = {};
-  for (const c of mano) { const k = valorPares(c.valor); g[k] = (g[k] || 0) + 1; }
-  const orden = { duples: 3, medias: 2, pareja: 1 };
-  const tipo = tienePareja(mano);
-  if (!tipo) return 0;
-  const entries = Object.entries(g).sort((a, b) => b[1] - a[1] || b[0] - a[0]);
-  return orden[tipo] * 1000 + parseInt(entries[0][0]);
-}
-function manoATexto(mano) {
-  return mano.map(c => `${NOMBRES_VALOR[c.valor]} de ${c.palo}`).join(", ");
-}
-// Devuelve la mano ordenada para grande (desc) o chica (asc) como texto
-function manoOrdenadaGrande(mano) {
-  return [...mano]
-    .sort((a, b) => rangoGrande(b.valor) - rangoGrande(a.valor))
-    .map(c => NOMBRES_VALOR[c.valor]).join(" > ");
-}
-function manoOrdenadaChica(mano) {
-  return [...mano]
-    .sort((a, b) => rangoGrande(a.valor) - rangoGrande(b.valor))
-    .map(c => NOMBRES_VALOR[c.valor]).join(" < ");
-}
-// Fuerza relativa de la mano (0-100) para grande y chica
-function fuerzaGrande(mano) {
-  const r = [...mano].sort((a, b) => rangoGrande(b.valor) - rangoGrande(a.valor))
-    .map(c => rangoGrande(c.valor));
-  const score = r[0]*512 + r[1]*64 + r[2]*8 + r[3]; // max=4680, min=585
-  const pct = Math.round((score - 585) / (4680 - 585) * 100);
-  if (pct >= 80) return "muy fuerte";
-  if (pct >= 55) return "fuerte";
-  if (pct >= 35) return "media";
-  
-  return "muy débil";
-}
-function fuerzaChica(mano) {
-  const r = [...mano].sort((a, b) => rangoGrande(a.valor) - rangoGrande(b.valor))
-    .map(c => rangoGrande(c.valor));
-  const score = r[0]*512 + r[1]*64 + r[2]*8 + r[3]; // menor = mejor para chica
-  const pct = Math.round((4680 - score) / (4680 - 585) * 100);
-  if (pct >= 80) return "muy fuerte";
-  if (pct >= 55) return "fuerte";
-  if (pct >= 35) return "media";
-  if (pct >= 15) return "débil";
-  return "muy débil";
-}
-
-// ── IA CON CLAUDE API ─────────────────────────────────────────────────────────
-async function consultarIA(prompt) {
-  try {
-    const apiUrl = import.meta.env.DEV
-      ? "http://localhost:3001/api/claude"
-      : "/.netlify/functions/claude"
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        system: `Eres un jugador experto de mus español. Respondes ÚNICAMENTE con JSON válido sin texto adicional ni markdown.
-
-EQUIVALENCIAS: los 3 valen como Reyes (en todas las situaciones), los 2 valen como Ases (en todas las situaciones).
-
-LANCES Y CÓMO SE GANAN:
-- Grande: gana quien tenga cartas MÁS ALTAS comparando carta a carta (de mayor a menor) según la escala R/3 > C > S > 7 > 6 > 5 > 4 > A/2. NO se suman puntos: se compara la 1ª carta con la 1ª carta, si hay empate la 2ª con la 2ª, etc. En empate absoluto gana el mano.
-- Chica: igual pero gana quien tenga cartas MÁS BAJAS. Escala A/2 < 4 < 5 < 6 < 7 < S < C < R/3. NO se suman puntos: se compara la carta más baja del jugador con la más baja del rival, etc. En empate gana el mano.
-- Pares: se requiere al menos una pareja. Duples (dos parejas) > Medias (trío) > Pareja. En empate gana quien tenga el grupo de mayor valor de carta. Las declaraciones son obligatoriamente honestas.
-- Juego: necesitas suma de puntos ≥ 31 (Rey/Caballo/Sota/3=10pts, As/2=1pt, resto=su valor). Gana: 31 real (tres 7s+Sota) > 31 normal > 32 > 33 > ... Las declaraciones son obligatoriamente honestas.
-- Punto: solo si ninguno tiene juego. Gana quien tenga más puntos (máx. 30).
-
-ESTRATEGIA:
-- En grande y chica, recibirás tu mano ordenada y una valoración de fuerza (muy fuerte/fuerte/media/débil/muy débil). Basa tus decisiones de apuesta en esa fuerza, no en suposiciones sobre puntos.
-- Farolea cuando vayas perdiendo en el marcador o cuando tu mano sea débil pero tengas algo que ganar.
-- Si vas ganando cómodamente, juega más conservador para no arriesgar.
-- El mano habla primero en cada lance y gana los empates: ten esto en cuenta al decidir si envidar o pasar.`,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    const data = await res.json();
-    const text = data.content?.[0]?.text || "{}";
-    const clean = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
-  } catch (e) {
-    console.error("Error IA:", e);
-    return null;
-  }
-}
-
-// ── IA CON HEURÍSTICA ─────────────────────────────────────────────────────────
-const ACTION_INT_TO_STR = {
-  [ACT_PASO]:      'paso',
-  [ACT_ENVIDO_2]:  'envido_2',
-  [ACT_ENVIDO_4]:  'envido_4',
-  [ACT_ORDAGO]:    'ordago',
-  [ACT_QUIERO]:    'quiero',
-  [ACT_NO_QUIERO]: 'no_quiero',
-  [ACT_SUBIR]:     'envido_2',  // subir = envido_2 adicional
-};
-
-function consultarHeuristica(gameState) {
-  try {
-    const legal = getLegalActionsHeuristic(gameState.faseApuesta, gameState.apuestaAbierta);
-    const accionInt = heuristicDecide({
-      mano:              gameState.manoJugador,
-      fase:              gameState.faseApuesta,
-      faseApuesta:       gameState.faseApuesta,
-      esMano:            gameState.esManoJugador,
-      scoreSelf:         gameState.puntosJugador,
-      scoreOpp:          gameState.puntosBot,
-      apuestaAbierta:    gameState.apuestaAbierta,
-      cartasSeleccionadas: [],
-    }, legal);
-    const accion = ACTION_INT_TO_STR[accionInt] || 'paso';
-    return { accion };
-  } catch (e) {
-    console.error('Error heurística:', e);
-    return null;
-  }
-}
-
-// ── COMPONENTE CARTA ──────────────────────────────────────────────────────────
-// Las imágenes deben estar en public/cartas/{valor}_{palo}.png
-// Ejemplo: public/cartas/1_oros.png, public/cartas/12_bastos.png, etc.
-const USAR_IMAGENES = true;
-
-function Carta({ carta, oculta = false, seleccionada = false, onClick = null }) {
-  if (oculta) {
-    return (
-      <div style={{
-        width: 100, height: 144, borderRadius: 10, flexShrink: 0,
-        background: "repeating-linear-gradient(45deg,#0f2744 0px,#0f2744 5px,#0d1f38 5px,#0d1f38 10px)",
-        border: "2px solid #1e4a7a",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 28, boxShadow: "0 4px 12px rgba(0,0,0,0.5)"
-      }}>🂠</div>
-    );
-  }
-  const color = PALO_COLOR[carta.palo];
-  const wrapStyle = {
-    width: 100, height: 144, borderRadius: 10, flexShrink: 0,
-    border: seleccionada ? `3px solid ${color}` : "2px solid #c8b89a",
-    cursor: onClick ? "pointer" : "default",
-    transition: "all 0.15s ease",
-    transform: seleccionada ? "translateY(-12px) scale(1.05)" : "none",
-    boxShadow: seleccionada ? `0 10px 28px ${color}55` : "0 3px 10px rgba(0,0,0,0.25)",
-    userSelect: "none", overflow: "hidden"
-  };
-
-  if (USAR_IMAGENES) {
-    return (
-      <div onClick={onClick} style={wrapStyle}>
-        <img
-          src={`/cartas/${carta.valor}_${carta.palo}.png`}
-          alt={`${NOMBRES_VALOR[carta.valor]} de ${carta.palo}`}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div onClick={onClick} style={{
-      ...wrapStyle,
-      background: seleccionada ? `linear-gradient(160deg,${color}22,${color}44)` : "linear-gradient(160deg,#fff,#f2ede0)",
-      display: "flex", flexDirection: "column", alignItems: "center",
-      justifyContent: "space-between", padding: "5px 3px",
-    }}>
-      <div style={{ fontSize: 15, fontWeight: 800, color, fontFamily: "Georgia,serif", lineHeight: 1 }}>
-        {NOMBRES_VALOR[carta.valor]}
-      </div>
-      <div style={{ fontSize: 30, lineHeight: 1 }}>{PALO_EMOJI[carta.palo]}</div>
-      <div style={{ fontSize: 15, fontWeight: 800, color, fontFamily: "Georgia,serif", transform: "rotate(180deg)", lineHeight: 1 }}>
-        {NOMBRES_VALOR[carta.valor]}
-      </div>
-    </div>
-  );
-}
+import {
+  crearBaraja, barajar, repartir,
+  puntosMano, tieneJuego, es31Real, valorJuego,
+  compararManos,
+  tienePareja, valorPareja,
+  manoATexto, manoOrdenadaGrande, manoOrdenadaChica,
+  fuerzaGrande, fuerzaChica,
+  puntosParesSinOponente, puntosJuegoSinOponente,
+} from './musEngine.js';
+import { consultarIA, consultarHeuristica } from './musBot.js';
+import Carta from './Carta.jsx';
 
 // ── COMPONENTE PRINCIPAL ──────────────────────────────────────────────────────
 export default function Mus() {
@@ -308,7 +39,6 @@ export default function Mus() {
   const botMusDecididoRef = useRef(false); // evita que botDecideMus se llame dos veces
   const [declaracionJugador, setDeclaracionJugador] = useState(null);
   const [declaracionBot, setDeclaracionBot] = useState(null);
-  const [historial, setHistorial] = useState([]);
   // Extra apostado en pares/juego (se suma a puntos base al final)
   const [apuestaExtraPares, setApuestaExtraPares] = useState(null); // {quien, extra}
   const [apuestaExtraJuego, setApuestaExtraJuego] = useState(null); // {quien, extra}
@@ -413,7 +143,6 @@ export default function Mus() {
   const iniciar = () => {
     setPuntosJugador(0);
     setPuntosBot(0);
-    setHistorial([]);
     setGanador(null);
     setEsManoJugador(true);
     esManoJRef.current = true;
@@ -605,10 +334,6 @@ Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede 
   // ── APUESTAS ─────────────────────────────────────────────────────────────────
 
   // Jugador pasa — bot responde (puede pasar o abrir)
-  // Actualiza el estado visual de un lance
-  const actualizarLance = useCallback((lance, tipo, pts = null, quien = null) => {
-    setEstadoLances(prev => ({ ...prev, [lance]: { tipo, pts, quien } }));
-  }, []);
 
   // Bot abre la apuesta cuando es mano (habla primero)
   const botAbreApuesta = useCallback(async () => {
@@ -822,19 +547,6 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
       if (!comprobarVictoriaInmediata()) avanzarFase(tipo);
     }
   };
-
-  // ── PUNTOS AUTOMÁTICOS PARES/JUEGO SIN OPONENTE ──────────────────────────────
-  function puntosParesSinOponente(mano) {
-    const tipo = tienePareja(mano);
-    if (tipo === "pareja") return 1;
-    if (tipo === "medias") return 2;   // 3 iguales
-    if (tipo === "duples") return 3;   // 2 parejas (distintas o iguales)
-    return 0;
-  }
-  function puntosJuegoSinOponente(mano) {
-    if (!tieneJuego(mano)) return 0;
-    return puntosMano(mano) === 31 ? 3 : 2;
-  }
 
   // ── RESOLVER COMPARACIÓN ────────────────────────────────────────────────────
   const resolverApuesta = (tipo, cantidad) => {
@@ -1130,7 +842,6 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
       declaracionJugador !== null && declaracionBot !== null
     ) {
       const tipo = fase === "declarar_pares" ? "pares" : "juego";
-      const mJ = manoJRef.current, mB = manoBRef.current;
       const jTiene = declaracionJugador === "si";
       const bTiene = declaracionBot === "si";
 
@@ -1198,7 +909,6 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
     const bJ = boteJRef.current, bB = boteBRef.current;
     const nj = ptJRef.current + bJ, nb = ptBRef.current + bB;
     log(`Mano: +${bJ} para ti, +${bB} para el bot`, "sistema");
-    setHistorial(prev => [...prev, { jugador: bJ, bot: bB }]);
     setPuntosJugador(nj);
     setPuntosBot(nb);
     if (nj >= 40) { setGanador("jugador"); setFase("fin"); }
@@ -1349,7 +1059,6 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
           <div style={{ fontSize: 14, color: "redOrange", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 4 }}>LANCES</div>
           {["grande", "chica", "pares", "juego", "punto"].map(lance => {
             const e = estadoLances[lance];
-            const esFaseActual = faseApuesta === lance || (fase === "apuesta" && faseApuesta === lance);
             const faseActiva = ["declarar_pares", "pares"].includes(fase) && lance === "pares"
               || ["declarar_juego", "juego"].includes(fase) && lance === "juego"
               || fase === "apuesta" && faseApuesta === lance;
