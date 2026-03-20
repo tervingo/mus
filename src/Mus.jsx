@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { initDQN, dqnDecide, getLegalActions } from './musBot.js';
-
+import { heuristicDecide, getLegalActionsHeuristic,
+         ACT_MUS, ACT_NO_HAY_MUS, ACT_DESCARTAR,
+         ACT_PASO, ACT_ENVIDO_2, ACT_ENVIDO_4, ACT_ORDAGO,
+         ACT_QUIERO, ACT_NO_QUIERO, ACT_SUBIR,
+         ACT_SEL_CARTA_0, ACT_SEL_CARTA_1, ACT_SEL_CARTA_2, ACT_SEL_CARTA_3
+} from './musHeuristic.js';
 // ── CONSTANTES ────────────────────────────────────────────────────────────────
 const PALOS = ["oros", "copas", "espadas", "bastos"];
 const VALORES = [1, 2, 3, 4, 5, 6, 7, 10, 11, 12];
@@ -189,16 +193,34 @@ ESTRATEGIA:
   }
 }
 
-// ── IA CON DQN ────────────────────────────────────────────────────────────────
-async function consultarDQN(gameState) {
+// ── IA CON HEURÍSTICA ─────────────────────────────────────────────────────────
+const ACTION_INT_TO_STR = {
+  [ACT_PASO]:      'paso',
+  [ACT_ENVIDO_2]:  'envido_2',
+  [ACT_ENVIDO_4]:  'envido_4',
+  [ACT_ORDAGO]:    'ordago',
+  [ACT_QUIERO]:    'quiero',
+  [ACT_NO_QUIERO]: 'no_quiero',
+  [ACT_SUBIR]:     'envido_2',  // subir = envido_2 adicional
+};
+
+function consultarHeuristica(gameState) {
   try {
-    const legal = getLegalActions(gameState.faseApuesta, gameState.apuestaAbierta);
-    const accion = await dqnDecide(gameState, legal);
-    if (!accion) return null;
-    // Devuelve el mismo formato que consultarIA
+    const legal = getLegalActionsHeuristic(gameState.faseApuesta, gameState.apuestaAbierta);
+    const accionInt = heuristicDecide({
+      mano:              gameState.manoJugador,
+      fase:              gameState.faseApuesta,
+      faseApuesta:       gameState.faseApuesta,
+      esMano:            gameState.esManoJugador,
+      scoreSelf:         gameState.puntosJugador,
+      scoreOpp:          gameState.puntosBot,
+      apuestaAbierta:    gameState.apuestaAbierta,
+      cartasSeleccionadas: [],
+    }, legal);
+    const accion = ACTION_INT_TO_STR[accionInt] || 'paso';
     return { accion };
   } catch (e) {
-    console.error("Error DQN:", e);
+    console.error('Error heurística:', e);
     return null;
   }
 }
@@ -334,25 +356,20 @@ export default function Mus() {
   const grandeResultadoRef = useRef(null);
   const chicaResultadoRef = useRef(null);
 
-  // Inicializar DQN una sola vez al montar el componente
-  useEffect(() => {
-    initDQN();
-  }, []);
-
-  // Wrapper: elige entre Claude y DQN según modoDQN
+  // Wrapper: elige entre Claude y heurística según modoDQN
   const botDecide = useCallback(async (prompt, gameStateOverride = null) => {
     if (modoDQNRef.current) {
       const gs = gameStateOverride || {
-        manoJugador: manoBRef.current,   // perspectiva del bot = manoBot
-        fase: faseApuestaRef.current,
-        faseApuesta: faseApuestaRef.current,
-        esManoJugador: !esManoJRef.current, // bot es mano si jugador NO es mano
-        puntosJugador: ptBRef.current,      // desde perspectiva del bot
-        puntosBot: ptJRef.current,
-        apuestaAbierta: null,               // se pasa explícitamente si hace falta
+        manoJugador:   manoBRef.current,
+        fase:          faseApuestaRef.current,
+        faseApuesta:   faseApuestaRef.current,
+        esManoJugador: !esManoJRef.current,
+        puntosJugador: ptBRef.current,
+        puntosBot:     ptJRef.current,
+        apuestaAbierta: null,
         declaracionBot: null,
       };
-      return consultarDQN(gs);
+      return consultarHeuristica(gs);
     }
     return consultarIA(prompt);
   }, [modoDQN]);
@@ -407,15 +424,22 @@ export default function Mus() {
   // Cuando fase=mus y bot es mano, el bot decide primero si quiere mus
   const botDecideMus = useCallback(async () => {
     const manoB = manoBRef.current;
-    const fG = fuerzaGrande(manoB);
-    const fC = fuerzaChica(manoB);
-    const malaGrande = fG === "débil" || fG === "muy débil";
-    const malaChica  = fC === "débil" || fC === "muy débil";
     let quiere;
     let razonBot = "";
     if (modoDQNRef.current) {
-      quiere = malaGrande || malaChica || !tienePareja(manoB);
+      const legal = [ACT_MUS, ACT_NO_HAY_MUS];
+      const accion = heuristicDecide({
+        mano: manoB, fase: 'mus', faseApuesta: 'grande',
+        esMano: true,
+        scoreSelf: ptBRef.current, scoreOpp: ptJRef.current,
+        apuestaAbierta: null, cartasSeleccionadas: [],
+      }, legal);
+      quiere = accion === ACT_MUS;
     } else {
+      const fG = fuerzaGrande(manoB);
+      const fC = fuerzaChica(manoB);
+      const malaGrande = fG === "débil" || fG === "muy débil";
+      const malaChica  = fC === "débil" || fC === "muy débil";
       setEsperandoBot(true);
       const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
 Eres el MANO. ¿Pides mus? Considera si tu mano es mejorable.
@@ -452,13 +476,15 @@ Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
     setEsperandoBot(true);
     const manoB = manoBRef.current;
     let quiere;
-    if (modoDQNRef.current) {
-      // Heurística: acepta mus si la mano es débil en grande o chica o no tiene pares/juego
-      const fG = fuerzaGrande(manoB);
-      const fC = fuerzaChica(manoB);
-      const malaGrande = fG === "débil" || fG === "muy débil";
-      const malaChica  = fC === "débil" || fC === "muy débil";
-      quiere = malaGrande || malaChica || !tienePareja(manoB);
+ if (modoDQNRef.current) {
+      const legal = [ACT_MUS, ACT_NO_HAY_MUS];
+      const accion = heuristicDecide({
+        mano: manoB, fase: 'mus', faseApuesta: 'grande',
+        esMano: !esManoJRef.current,
+        scoreSelf: ptBRef.current, scoreOpp: ptJRef.current,
+        apuestaAbierta: null, cartasSeleccionadas: [],
+      }, legal);
+      quiere = accion === ACT_MUS;
       setEsperandoBot(false);
     } else {
       const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
@@ -494,24 +520,43 @@ if (quiere) {
   };
 
   const descartar = async () => {
-    const baraja = barajar(crearBaraja());
-    let idx = 0;
-    const nuevasJ = manoJugador.map((c, i) => cartasSeleccionadas.includes(i) ? baraja[idx++] : c);
+    // Mazo único excluyendo cartas en juego
+    const cartasEnJuego = [...manoJugador, ...manoBRef.current];
+    const mazo = barajar(crearBaraja().filter(c =>
+      !cartasEnJuego.some(j => j.palo === c.palo && j.valor === c.valor)
+    ));
+    let idxMazo = 0;
+    const nuevasJ = manoJugador.map((c, i) =>
+      cartasSeleccionadas.includes(i) ? mazo[idxMazo++] : c
+    );
     log(`Tú: Descartas ${cartasSeleccionadas.length} carta(s)`, "jugador");
     setEsperandoBot(true);
     const manoB = manoBRef.current;
     let indices;
     if (modoDQNRef.current) {
-      // Heurística: descarta las 2 peores cartas para grande (las de menor rangoGrande)
-      // salvo si tiene juego o pares, en cuyo caso no descarta nada
-      if (tieneJuego(manoB) || tienePareja(manoB)) {
-        indices = [];
-      } else {
-        const ordenadas = manoB
-          .map((c, i) => ({ i, r: rangoGrande(c.valor) }))
-          .sort((a, b) => a.r - b.r);
-        indices = ordenadas.slice(0, 2).map(x => x.i);
+      const selAcciones = [12, 13, 14, 15];
+      const cartasSelBot = [];
+      const legalDescarte = [12, 13, 14, 15, ACT_DESCARTAR];
+      let pasos = 0;
+      while (pasos < 10) {
+        const accion = heuristicDecide({
+          mano: manoB, fase: 'descarte', faseApuesta: 'grande',
+          esMano: !esManoJRef.current,
+          scoreSelf: ptBRef.current, scoreOpp: ptJRef.current,
+          apuestaAbierta: null, cartasSeleccionadas: cartasSelBot,
+        }, legalDescarte);
+        if (accion === ACT_DESCARTAR) break;
+        const idx = selAcciones.indexOf(accion);
+        if (idx >= 0 && !cartasSelBot.includes(idx)) {
+          cartasSelBot.push(idx);
+        } else break;
+        pasos++;
       }
+      indices = cartasSelBot.length > 0 ? cartasSelBot : [
+        // Garantizar al menos 1 descarte: la peor carta para grande
+        manoB.map((c, i) => ({ i, r: c.valor === 12 || c.valor === 3 ? 8 : c.valor === 11 ? 7 : c.valor === 10 ? 6 : c.valor === 7 ? 5 : c.valor === 6 ? 4 : c.valor === 5 ? 3 : c.valor === 4 ? 2 : 1 }))
+             .sort((a, b) => a.r - b.r)[0].i
+      ];
       setEsperandoBot(false);
     } else {
       const resp = await consultarIA(`Tu mano (índices 0-3): ${manoATexto(manoB)}.
@@ -521,9 +566,10 @@ Responde JSON: {"indicesToDescartar": [lista de índices 0-3 a descartar, puede 
       setEsperandoBot(false);
       indices = resp?.indicesToDescartar?.filter(i => i >= 0 && i < 4) || [];
     }
-    const baraja2 = barajar(crearBaraja());
-    let idx2 = 0;
-    const nuevasB = manoB.map((c, i) => indices.includes(i) ? baraja2[idx2++] : c);
+    // Bot usa el mismo mazo (continúa donde lo dejó el jugador)
+    const nuevasB = manoB.map((c, i) =>
+      indices.includes(i) ? mazo[idxMazo++] : c
+    );
     log(`Bot: Descarta ${indices.length}`, "bot");
     setManoJugador(nuevasJ);
     setManoBot(nuevasB);
@@ -633,6 +679,72 @@ JSON: {"accion": "paso"|"envido", "cantidad": 2/4/999, "razon": "breve"}`, {
   };
 
   // Jugador envida — bot responde
+  // Helper: cobra el resultado de un "no quiero"
+  // quien: quién cobra ('jugador' o 'bot') — el que envió el último envite
+  // cantidadAceptada: piedras ya comprometidas (0 si no hay)
+  const cobrarNoQuiero = useCallback((tipo, quien, cantidadAceptada) => {
+    const setBoteCobrador = quien === 'jugador' ? setBoteJugador : setBoteBot;
+    const manoC = quien === 'jugador' ? manoJRef.current : manoBRef.current;
+    const emoji = quien === 'jugador' ? '✅ Tú ganas' : '❌ Bot gana';
+
+    if (cantidadAceptada > 0) {
+      // Había apuestas aceptadas → cobra las aceptadas (sin piedra de "porque no")
+      if (tipo === 'pares') {
+        const base = puntosParesSinOponente(manoC);
+        const total = cantidadAceptada + base;
+        setBoteCobrador(prev => prev + total);
+        log(`${emoji} ${total} en pares (${cantidadAceptada} aceptadas + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
+        if (quien === 'jugador') setApuestaExtraPares({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
+        else setApuestaExtraPares({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+      } else if (tipo === 'juego') {
+        const base = puntosJuegoSinOponente(manoC);
+        const total = cantidadAceptada + base;
+        setBoteCobrador(prev => prev + total);
+        log(`${emoji} ${total} en juego (${cantidadAceptada} aceptadas + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
+        if (quien === 'jugador') setApuestaExtraJuego({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
+        else setApuestaExtraJuego({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+      } else if (tipo === 'punto') {
+        const total = cantidadAceptada + 1;
+        setBoteCobrador(prev => prev + total);
+        log(`${emoji} ${total} en punto (${cantidadAceptada} aceptadas + 1 base)`, quien === 'jugador' ? 'exito' : 'error');
+        if (quien === 'jugador') setApuestaExtraPunto({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
+        else setApuestaExtraPunto({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+      } else {
+        setBoteCobrador(prev => prev + cantidadAceptada);
+        log(`${emoji} ${cantidadAceptada} en ${tipo} (apuestas aceptadas, sin porque no)`, quien === 'jugador' ? 'exito' : 'error');
+        if (tipo === 'grande') grandeResultadoRef.current = { quien, pts: cantidadAceptada };
+        if (tipo === 'chica')  chicaResultadoRef.current  = { quien, pts: cantidadAceptada };
+      }
+    } else {
+      // Sin apuestas aceptadas → 1 piedra de "porque no"
+      if (tipo === 'pares') {
+        const base = puntosParesSinOponente(manoC);
+        const total = 1 + base;
+        setBoteCobrador(prev => prev + total);
+        log(`${emoji} ${total} en pares (1 porque no + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
+        if (quien === 'jugador') setApuestaExtraPares({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
+        else setApuestaExtraPares({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+      } else if (tipo === 'juego') {
+        const base = puntosJuegoSinOponente(manoC);
+        const total = 1 + base;
+        setBoteCobrador(prev => prev + total);
+        log(`${emoji} ${total} en juego (1 porque no + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
+        if (quien === 'jugador') setApuestaExtraJuego({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
+        else setApuestaExtraJuego({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+      } else if (tipo === 'punto') {
+        setBoteCobrador(prev => prev + 2);
+        log(`${emoji} 2 en punto (1 porque no + 1 base)`, quien === 'jugador' ? 'exito' : 'error');
+        if (quien === 'jugador') setApuestaExtraPunto({ quien: 'jugador', extra: 0, resuelto: true, pts: 2 });
+        else setApuestaExtraPunto({ quien: 'bot', extra: 0, resuelto: true, pts: 2 });
+      } else {
+        setBoteCobrador(prev => prev + 1);
+        log(`${emoji} 1 piedra (porque no) en ${tipo}`, quien === 'jugador' ? 'exito' : 'error');
+        if (tipo === 'grande') grandeResultadoRef.current = { quien, pts: 1 };
+        if (tipo === 'chica')  chicaResultadoRef.current  = { quien, pts: 1 };
+      }
+    }
+  }, [log]);
+
   const jugadorEnvido = async (cantidad) => {
     log(`Tú: ${cantidad === 999 ? "Órdago" : `Envido (${cantidad})`}`, "jugador");
     setEsperandoBot(true);
@@ -648,7 +760,7 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
       fase: tipo, faseApuesta: tipo,
       esManoJugador: !esManoJRef.current,
       puntosJugador: ptBRef.current, puntosBot: ptJRef.current,
-      apuestaAbierta: { cantidad, quien: "jugador" }, declaracionBot: null,
+      apuestaAbierta: { cantidad, cantidadAceptada: 0, quien: "jugador" }, declaracionBot: null,
     });
     setEsperandoBot(false);
     if (!resp || resp.accion === "quiero") {
@@ -657,35 +769,13 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
     } else if (resp.accion === "subir" && cantidad !== 999) {
       const nueva = Math.max((resp.cantidad || cantidad + 2), cantidad + 1);
       log(`Bot: Envido (${nueva})${resp.razon ? ` — ${resp.razon}` : ""}`, "bot");
-      setApuestaAbierta({ cantidad: nueva, quien: "bot" });
+      setApuestaAbierta({ cantidad: nueva, cantidadAceptada: cantidad, quien: "bot" });
     } else {
       log(`Bot: No quiero${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
-      // El que envida gana el lance: cobra 1 (porque no) + su propia base, sin comparación
-      if (tipo === "pares") {
-        const base = puntosParesSinOponente(manoJRef.current);
-        const total = 1 + base;
-        setBoteJugador(prev => prev + total);
-        log(`✅ No quiero: tú ganas ${total} en pares (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraPares({ quien: "jugador", extra: 0, resuelto: true, pts: total });
-      } else if (tipo === "juego") {
-        const base = puntosJuegoSinOponente(manoJRef.current);
-        const total = 1 + base;
-        setBoteJugador(prev => prev + total);
-        log(`✅ No quiero: tú ganas ${total} en juego (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraJuego({ quien: "jugador", extra: 0, resuelto: true, pts: total });
-      } else if (tipo === "punto") {
-        setBoteJugador(prev => prev + 2);
-        log(`✅ No quiero: tú ganas 2 en punto (1 porque no + 1 base)`, "exito");
-        setApuestaExtraPunto({ quien: "jugador", extra: 0, resuelto: true, pts: 2 });
-      } else {
-        setBoteJugador(prev => prev + 1);
-        log(`✅ Tú ganas 1 piedra (porque no) en ${tipo}`, "exito");
-        if (tipo === "grande") grandeResultadoRef.current = { quien: "jugador", pts: 1 };
-        if (tipo === "chica") chicaResultadoRef.current = { quien: "jugador", pts: 1 };
-      }
+      cobrarNoQuiero(tipo, 'jugador', 0);
       setApuestaAbierta(null);
       setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: 1, quien: 'jugador' } }));
-      avanzarFase(tipo);
+      if (!comprobarVictoriaInmediata()) avanzarFase(tipo);
     }
   };
 
@@ -697,32 +787,11 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
   const jugadorNoQuiere = () => {
     log("Tú: No quiero", "jugador");
     const tipo = faseApuestaRef.current;
-    // El que envida (bot) gana el lance: cobra 1 (porque no) + su propia base, sin comparación
-    if (tipo === "pares") {
-      const base = puntosParesSinOponente(manoBRef.current);
-      const total = 1 + base;
-      setBoteBot(prev => prev + total);
-      log(`❌ No quiero: bot gana ${total} en pares (1 porque no + ${base} base)`, "error");
-      setApuestaExtraPares({ quien: "bot", extra: 0, resuelto: true, pts: total });
-    } else if (tipo === "juego") {
-      const base = puntosJuegoSinOponente(manoBRef.current);
-      const total = 1 + base;
-      setBoteBot(prev => prev + total);
-      log(`❌ No quiero: bot gana ${total} en juego (1 porque no + ${base} base)`, "error");
-      setApuestaExtraJuego({ quien: "bot", extra: 0, resuelto: true, pts: total });
-    } else if (tipo === "punto") {
-      setBoteBot(prev => prev + 2);
-      log(`❌ No quiero: bot gana 2 en punto (1 porque no + 1 base)`, "error");
-      setApuestaExtraPunto({ quien: "bot", extra: 0, resuelto: true, pts: 2 });
-    } else {
-      setBoteBot(prev => prev + 1);
-      log(`❌ Bot gana 1 piedra (porque no) en ${tipo}`, "error");
-      if (tipo === "grande") grandeResultadoRef.current = { quien: "bot", pts: 1 };
-      if (tipo === "chica") chicaResultadoRef.current = { quien: "bot", pts: 1 };
-    }
+    const aceptadas = apuestaAbierta?.cantidadAceptada ?? 0;
+    cobrarNoQuiero(tipo, 'bot', aceptadas);
     setApuestaAbierta(null);
-    setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: 1, quien: 'bot' } }));
-    avanzarFase(tipo);
+    setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: aceptadas || 1, quien: 'bot' } }));
+    if (!comprobarVictoriaInmediata()) avanzarFase(tipo);
   };
 
   // Jugador sube la apuesta del bot
@@ -731,14 +800,15 @@ JSON: {"accion": "quiero"|"noquiero"|"subir", "cantidad": si subes pon el nuevo 
     setEsperandoBot(true);
     const tipo = faseApuestaRef.current;
     const manoB = manoBRef.current;
+    const cantidadAceptadaPorJugador = apuestaAbierta?.cantidad ?? 0;
     const resp = await botDecide(`Fase ${tipo}. ${contextoApuesta(tipo, manoB)}
-El rival ha subido la apuesta a ${nueva} piedras. Si no quieres, el rival gana 1 piedra "porque no". ¿Aceptas?
+El rival ha subido la apuesta a ${nueva} piedras (acepta tus ${cantidadAceptadaPorJugador} y añade más). Si no quieres, el rival cobra las ${cantidadAceptadaPorJugador} piedras aceptadas.
 JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
       manoJugador: manoB,
       fase: tipo, faseApuesta: tipo,
       esManoJugador: !esManoJRef.current,
       puntosJugador: ptBRef.current, puntosBot: ptJRef.current,
-      apuestaAbierta: { cantidad: nueva, quien: "jugador" }, declaracionBot: null,
+      apuestaAbierta: { cantidad: nueva, cantidadAceptada: cantidadAceptadaPorJugador, quien: "jugador" }, declaracionBot: null,
     });
     setEsperandoBot(false);
     if (!resp || resp.accion === "quiero") {
@@ -746,32 +816,10 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
       resolverApuesta(tipo, nueva);
     } else {
       log(`Bot: No quiero${resp?.razon ? ` — ${resp.razon}` : ""}`, "bot");
-      // El que envida (jugador) gana el lance: cobra 1 (porque no) + su propia base, sin comparación
-      if (tipo === "pares") {
-        const base = puntosParesSinOponente(manoJRef.current);
-        const total = 1 + base;
-        setBoteJugador(prev => prev + total);
-        log(`✅ No quiero: tú ganas ${total} en pares (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraPares({ quien: "jugador", extra: 0, resuelto: true, pts: total });
-      } else if (tipo === "juego") {
-        const base = puntosJuegoSinOponente(manoJRef.current);
-        const total = 1 + base;
-        setBoteJugador(prev => prev + total);
-        log(`✅ No quiero: tú ganas ${total} en juego (1 porque no + ${base} base)`, "exito");
-        setApuestaExtraJuego({ quien: "jugador", extra: 0, resuelto: true, pts: total });
-      } else if (tipo === "punto") {
-        setBoteJugador(prev => prev + 2);
-        log(`✅ No quiero: tú ganas 2 en punto (1 porque no + 1 base)`, "exito");
-        setApuestaExtraPunto({ quien: "jugador", extra: 0, resuelto: true, pts: 2 });
-      } else {
-        setBoteJugador(prev => prev + 1);
-        log(`✅ Tú ganas 1 piedra (porque no) en ${tipo}`, "exito");
-        if (tipo === "grande") grandeResultadoRef.current = { quien: "jugador", pts: 1 };
-        if (tipo === "chica") chicaResultadoRef.current = { quien: "jugador", pts: 1 };
-      }
+      cobrarNoQuiero(tipo, 'jugador', cantidadAceptadaPorJugador);
       setApuestaAbierta(null);
-      setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: 1, quien: 'jugador' } }));
-      avanzarFase(tipo);
+      setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'no_querida', pts: cantidadAceptadaPorJugador || 1, quien: 'jugador' } }));
+      if (!comprobarVictoriaInmediata()) avanzarFase(tipo);
     }
   };
 
@@ -816,11 +864,14 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
     const cant = cantidad === 999 ? 6 : cantidad;
 
     if (tipo === "grande" || tipo === "chica") {
-      // Grande y chica: el ganador se lleva directamente lo apostado
-      if (jugGana) { setBoteJugador(prev => prev + cant); log(`✅ Tú ganas ${cant} en ${tipo} (${desc})`, "exito"); }
-      else { setBoteBot(prev => prev + cant); log(`❌ Bot gana ${cant} en ${tipo} (${desc})`, "error"); }
-      if (tipo === "grande") grandeResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
-      else chicaResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
+      // Grande y chica: guardar resultado — se cobran al final junto con el resto
+      if (tipo === "grande") {
+        grandeResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
+        log(`${jugGana ? "✅ Tú ganas" : "❌ Bot gana"} ${cant} en grande (${desc}) — se cobra al final`, jugGana ? "exito" : "error");
+      } else {
+        chicaResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
+        log(`${jugGana ? "✅ Tú ganas" : "❌ Bot gana"} ${cant} en chica (${desc}) — se cobra al final`, jugGana ? "exito" : "error");
+      }
     } else {
       // Pares, juego y punto: guardar apuesta extra; los puntos base se calculan al final
       const extra = { quien: jugGana ? "jugador" : "bot", extra: cant };
@@ -1118,10 +1169,34 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
     }
   }, [declaracionJugador, declaracionBot, fase]);
 
+  // Comprueba si alguien ha llegado a 40 con el bote actual
+  // Se llama cada vez que se cobra un "porque no" durante la mano
+  const comprobarVictoriaInmediata = useCallback((boteJExtra = 0, boteBExtra = 0) => {
+    const nj = ptJRef.current + boteJRef.current + boteJExtra;
+    const nb = ptBRef.current + boteBRef.current + boteBExtra;
+    if (nj >= 40) {
+      setPuntosJugador(nj);
+      setPuntosBot(nb);
+      setGanador("jugador");
+      setFase("fin");
+      log(`🏆 ¡Has llegado a ${nj} piedras! Partida terminada.`, "exito");
+      return true;
+    }
+    if (nb >= 40) {
+      setPuntosJugador(nj);
+      setPuntosBot(nb);
+      setGanador("bot");
+      setFase("fin");
+      log(`😔 El bot ha llegado a ${nb} piedras. Partida terminada.`, "error");
+      return true;
+    }
+    return false;
+  }, [log]);
+
   // ── FIN DE MANO ──────────────────────────────────────────────────────────────
   const terminarMano = () => {
     const bJ = boteJRef.current, bB = boteBRef.current;
-    const nj = puntosJugador + bJ, nb = puntosBot + bB;
+    const nj = ptJRef.current + bJ, nb = ptBRef.current + bB;
     log(`Mano: +${bJ} para ti, +${bB} para el bot`, "sistema");
     setHistorial(prev => [...prev, { jugador: bJ, bot: bB }]);
     setPuntosJugador(nj);
@@ -1226,11 +1301,11 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
                 opacity: modoDQN ? 1 : 0.45,
                 border: modoDQN ? "2px solid #F6C90E" : "1px solid #5a4030",
               }}>
-              ⚡ Bot DQN
+              ⚡ Bot Heurística
             </button>
           </div>
           <p style={{ fontSize: 14, color: "redOrange", margin: 0 }}>
-            {modoDQN ? "Bot DQN: red neuronal entrenada por self-play (rápido, sin API)" : "Bot Claude: IA con razonamiento en lenguaje natural"}
+            {modoDQN ? "Bot Heurística: política calibrada, sin API, instantáneo" : "Bot Claude: IA con razonamiento en lenguaje natural"}
           </p>
         </div>
       </div>
@@ -1247,14 +1322,14 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
       {/* Cabecera */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", maxWidth: 900 }}>
         <p style={{ ...titulo, fontSize: "clamp(1.1rem,3.2vw,1.8rem)", flex: 1, margin: 0 }}>🂡 MUS</p>
-        <div style={{ fontSize: 14, color: "#F6C90E99", fontWeight: 700, letterSpacing: "0.1em" }}>
+        <div style={{ fontSize: 16, color: "#F6C90E99", fontWeight: 700, letterSpacing: "0.1em" }}>
           {etiquetaFase}
         </div>
-        {[{ l: "TÚ", v: puntosJugador + boteJugador, c: "#F6C90E", esMano: esManoJugador },
+        {[{ l: "TÚ", v: puntosJugador + boteJugador, c: "redOrange", esMano: esManoJugador },
           { l: "BOT", v: puntosBot + boteBot, c: "#e63946", esMano: !esManoJugador }].map(({ l, v, c, esMano }) => (
           <div key={l} style={{ ...panel, textAlign: "center", minWidth: 58, padding: "7px 12px", border: esMano ? "1px solid #a080c066" : panel.border }}>
-            <div style={{ fontSize: 10, color: "#7a6030" }}>{l}</div>
-            {esMano && <div style={{ fontSize: 10, color: "#a080c0", fontWeight: 700, letterSpacing: "0.1em" }}>MANO</div>}
+            <div style={{ fontSize: 12, color: "redOrange" }}>{l}</div>
+            {esMano && <div style={{ fontSize: 12, color: "#a080c0", fontWeight: 700, letterSpacing: "0.1em" }}>MANO</div>}
             <div style={{ fontSize: 21, fontWeight: 800, color: c, lineHeight: 1.1 }}>{v}</div>
           </div>
         ))}
@@ -1323,13 +1398,24 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
 
       {/* Mano bot */}
       <div style={{ ...panel, width: "100%" }}>
-        <div style={{ fontSize: 11, color: "#7a6030", marginBottom: 10, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4 }}>
+        <div style={{ fontSize: 11, color: "#7a6030", marginBottom: 10, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
           <span>MANO DEL BOT{!esManoJugador && <span style={{ color: "#a080c0", fontWeight: 700, marginLeft: 8 }}>(mano)</span>}</span>
-          {mostrarBotCartas && (
-            <span style={{ color: "#e8a0a0" }}>
-              {puntosMano(manoBot)} pts · {tienePareja(manoBot) || "sin pares"} · {tieneJuego(manoBot) ? `juego` : "sin juego"}
-            </span>
-          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {mostrarBotCartas && (
+              <span style={{ color: "#e8a0a0" }}>
+                {puntosMano(manoBot)} pts · {tienePareja(manoBot) || "sin pares"} · {tieneJuego(manoBot) ? `juego` : "sin juego"}
+              </span>
+            )}
+            <button
+              onClick={() => setMostrarBotCartas(prev => !prev)}
+              style={{
+                background: "transparent", border: "1px solid #5a4030",
+                borderRadius: 4, color: "#8a7050", fontSize: 10,
+                padding: "2px 7px", cursor: "pointer",
+              }}>
+              {mostrarBotCartas ? "🙈 ocultar" : "👁 ver"}
+            </button>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {manoBot.map((c, i) => <Carta key={i} carta={c} oculta={!mostrarBotCartas} />)}
