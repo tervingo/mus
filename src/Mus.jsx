@@ -18,8 +18,8 @@ import Carta from './Carta.jsx';
 export default function Mus() {
   const [fase, setFase] = useState("inicio");
   const [faseApuesta, setFaseApuesta] = useState("grande");
-  const [modoDQN, setModoDQN] = useState(false);
-  const modoDQNRef = useRef(false);
+  const [modoDQN, setModoDQN] = useState(true);
+  const modoDQNRef = useRef(true);
   useEffect(() => { modoDQNRef.current = modoDQN; }, [modoDQN]);
   const [manoJugador, setManoJugador] = useState([]);
   const [manoBot, setManoBot] = useState([]);
@@ -155,6 +155,16 @@ export default function Mus() {
     const manoB = manoBRef.current;
     let quiere;
     let razonBot = "";
+
+    // Modo desesperado: rival >= 35 y bot < 35 → siendo mano, cortar el mus para ir a apostar
+    if (ptJRef.current >= 35 && ptBRef.current < 35) {
+      log("Bot: No hay mus", "bot");
+      setMusRechazado(true);
+      setFaseApuesta("grande");
+      setFase("apuesta");
+      log("── GRANDE: ¿Paso o envido? ──", "sistema");
+      return;
+    }
     if (modoDQNRef.current) {
       const legal = [ACT_MUS, ACT_NO_HAY_MUS];
       const accion = heuristicDecide({
@@ -216,8 +226,9 @@ Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
       quiere = accion === ACT_MUS;
       setEsperandoBot(false);
     } else {
+      const desesperado = ptJRef.current >= 35 && ptBRef.current < 35;
       const resp = await consultarIA(`Tu mano: ${manoATexto(manoB)}.
-El rival pide mus. ¿Aceptas? Considera si tu mano es mejorable.
+El rival pide mus. ¿Aceptas? Considera si tu mano es mejorable.${desesperado ? "\nATENCIÓN: el rival está a punto de ganar (≥35 piedras). Acepta el mus si tu mano es mala para intentar mejorarla antes de apostar." : ""}
 Responde JSON: {"quiereMus": true/false, "razon": "breve"}`);
       setEsperandoBot(false);
       quiere = resp ? resp.quiereMus : Math.random() > 0.35;
@@ -409,63 +420,47 @@ JSON: {"accion": "paso"|"envido", "cantidad": 2/4/999, "razon": "breve"}`, {
   // cantidadAceptada: piedras ya comprometidas (0 si no hay)
   const cobrarNoQuiero = useCallback((tipo, quien, cantidadAceptada) => {
     const setBoteCobrador = quien === 'jugador' ? setBoteJugador : setBoteBot;
-    const manoC = quien === 'jugador' ? manoJRef.current : manoBRef.current;
     const emoji = quien === 'jugador' ? '✅ Tú ganas' : '❌ Bot gana';
 
     if (cantidadAceptada > 0) {
       // Había apuestas aceptadas → cobra las aceptadas (sin piedra de "porque no")
       if (tipo === 'pares') {
-        const base = puntosParesSinOponente(manoC);
-        const total = cantidadAceptada + base;
-        setBoteCobrador(prev => prev + total);
-        log(`${emoji} ${total} en pares (${cantidadAceptada} aceptadas + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
-        if (quien === 'jugador') setApuestaExtraPares({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
-        else setApuestaExtraPares({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+        setBoteCobrador(prev => prev + cantidadAceptada);
+        log(`${emoji} ${cantidadAceptada} en pares (aceptadas). Puntos base se cuentan al final.`, quien === 'jugador' ? 'exito' : 'error');
+        setApuestaExtraPares({ quien, extra: 0 });
       } else if (tipo === 'juego') {
-        const base = puntosJuegoSinOponente(manoC);
-        const total = cantidadAceptada + base;
-        setBoteCobrador(prev => prev + total);
-        log(`${emoji} ${total} en juego (${cantidadAceptada} aceptadas + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
-        if (quien === 'jugador') setApuestaExtraJuego({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
-        else setApuestaExtraJuego({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+        setBoteCobrador(prev => prev + cantidadAceptada);
+        log(`${emoji} ${cantidadAceptada} en juego (aceptadas). Puntos base se cuentan al final.`, quien === 'jugador' ? 'exito' : 'error');
+        setApuestaExtraJuego({ quien, extra: 0 });
       } else if (tipo === 'punto') {
-        const total = cantidadAceptada + 1;
-        setBoteCobrador(prev => prev + total);
-        log(`${emoji} ${total} en punto (${cantidadAceptada} aceptadas + 1 base)`, quien === 'jugador' ? 'exito' : 'error');
-        if (quien === 'jugador') setApuestaExtraPunto({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
-        else setApuestaExtraPunto({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+        setBoteCobrador(prev => prev + cantidadAceptada);
+        log(`${emoji} ${cantidadAceptada} en punto (aceptadas). Base se cuenta al final.`, quien === 'jugador' ? 'exito' : 'error');
+        setApuestaExtraPunto({ quien, extra: 0 });
       } else {
         setBoteCobrador(prev => prev + cantidadAceptada);
         log(`${emoji} ${cantidadAceptada} en ${tipo} (apuestas aceptadas, sin porque no)`, quien === 'jugador' ? 'exito' : 'error');
-        if (tipo === 'grande') grandeResultadoRef.current = { quien, pts: cantidadAceptada };
-        if (tipo === 'chica')  chicaResultadoRef.current  = { quien, pts: cantidadAceptada };
+        if (tipo === 'grande') grandeResultadoRef.current = { quien, pts: cantidadAceptada, cobrado: true };
+        if (tipo === 'chica')  chicaResultadoRef.current  = { quien, pts: cantidadAceptada, cobrado: true };
       }
     } else {
-      // Sin apuestas aceptadas → 1 piedra de "porque no"
+      // Sin apuestas aceptadas → 1 piedra de "porque no"; puntos base al final
       if (tipo === 'pares') {
-        const base = puntosParesSinOponente(manoC);
-        const total = 1 + base;
-        setBoteCobrador(prev => prev + total);
-        log(`${emoji} ${total} en pares (1 porque no + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
-        if (quien === 'jugador') setApuestaExtraPares({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
-        else setApuestaExtraPares({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+        setBoteCobrador(prev => prev + 1);
+        log(`${emoji} 1 piedra (porque no) en pares. Puntos base se cuentan al final.`, quien === 'jugador' ? 'exito' : 'error');
+        setApuestaExtraPares({ quien, extra: 0 });
       } else if (tipo === 'juego') {
-        const base = puntosJuegoSinOponente(manoC);
-        const total = 1 + base;
-        setBoteCobrador(prev => prev + total);
-        log(`${emoji} ${total} en juego (1 porque no + ${base} base)`, quien === 'jugador' ? 'exito' : 'error');
-        if (quien === 'jugador') setApuestaExtraJuego({ quien: 'jugador', extra: 0, resuelto: true, pts: total });
-        else setApuestaExtraJuego({ quien: 'bot', extra: 0, resuelto: true, pts: total });
+        setBoteCobrador(prev => prev + 1);
+        log(`${emoji} 1 piedra (porque no) en juego. Puntos base se cuentan al final.`, quien === 'jugador' ? 'exito' : 'error');
+        setApuestaExtraJuego({ quien, extra: 0 });
       } else if (tipo === 'punto') {
-        setBoteCobrador(prev => prev + 2);
-        log(`${emoji} 2 en punto (1 porque no + 1 base)`, quien === 'jugador' ? 'exito' : 'error');
-        if (quien === 'jugador') setApuestaExtraPunto({ quien: 'jugador', extra: 0, resuelto: true, pts: 2 });
-        else setApuestaExtraPunto({ quien: 'bot', extra: 0, resuelto: true, pts: 2 });
+        setBoteCobrador(prev => prev + 1);
+        log(`${emoji} 1 piedra (porque no) en punto. Base se cuenta al final.`, quien === 'jugador' ? 'exito' : 'error');
+        setApuestaExtraPunto({ quien, extra: 0 });
       } else {
         setBoteCobrador(prev => prev + 1);
         log(`${emoji} 1 piedra (porque no) en ${tipo}`, quien === 'jugador' ? 'exito' : 'error');
-        if (tipo === 'grande') grandeResultadoRef.current = { quien, pts: 1 };
-        if (tipo === 'chica')  chicaResultadoRef.current  = { quien, pts: 1 };
+        if (tipo === 'grande') grandeResultadoRef.current = { quien, pts: 1, cobrado: true };
+        if (tipo === 'chica')  chicaResultadoRef.current  = { quien, pts: 1, cobrado: true };
       }
     }
   }, [log]);
@@ -551,55 +546,50 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
   // ── RESOLVER COMPARACIÓN ────────────────────────────────────────────────────
   const resolverApuesta = (tipo, cantidad) => {
     const mJ = manoJRef.current, mB = manoBRef.current;
-    let jugGana = false, desc = "";
+    let jugGana = false;
     if (tipo === "grande") {
       const cmp = compararManos(mJ, mB, "grande");
-      jugGana = cmp > 0 || (cmp === 0 && esManoJRef.current); // empate → gana el mano
-      desc = `Grande: tú ${cmp > 0 ? "ganas" : cmp < 0 ? "pierdes" : "empatas (mano)"}`;
+      jugGana = cmp > 0 || (cmp === 0 && esManoJRef.current);
     } else if (tipo === "chica") {
       const cmp = compararManos(mJ, mB, "chica");
       jugGana = cmp > 0 || (cmp === 0 && esManoJRef.current);
-      desc = `Chica: tú ${cmp > 0 ? "ganas" : cmp < 0 ? "pierdes" : "empatas (mano)"}`;
     } else if (tipo === "pares") {
       const vJ = valorPareja(mJ), vB = valorPareja(mB);
       jugGana = vJ > vB || (vJ === vB && esManoJRef.current);
-      desc = `Tú: ${tienePareja(mJ) || "sin pares"} vs Bot: ${tienePareja(mB) || "sin pares"}`;
     } else if (tipo === "juego") {
       const vJ = valorJuego(mJ), vB = valorJuego(mB);
       jugGana = vJ > vB || (vJ === vB && esManoJRef.current);
-      desc = `Tú ${puntosMano(mJ)} vs Bot ${puntosMano(mB)}`;
     } else if (tipo === "punto") {
       const vJ = puntosMano(mJ), vB = puntosMano(mB);
       jugGana = vJ > vB || (vJ === vB && esManoJRef.current);
-      desc = `Punto: tú ${vJ} vs Bot ${vB}`;
     }
     const cant = cantidad === 999 ? 6 : cantidad;
 
     if (tipo === "grande" || tipo === "chica") {
-      // Grande y chica: guardar resultado — se cobran al final junto con el resto
+      // Grande y chica: guardar resultado — se cobran al final con las cartas visibles
       if (tipo === "grande") {
-        grandeResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
-        log(`${jugGana ? "✅ Tú ganas" : "❌ Bot gana"} ${cant} en grande (${desc}) — se cobra al final`, jugGana ? "exito" : "error");
+        grandeResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant, cobrado: false };
+        log(`Grande: envite querido — ${cant} piedras en juego`, "sistema");
       } else {
-        chicaResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant };
-        log(`${jugGana ? "✅ Tú ganas" : "❌ Bot gana"} ${cant} en chica (${desc}) — se cobra al final`, jugGana ? "exito" : "error");
+        chicaResultadoRef.current = { quien: jugGana ? "jugador" : "bot", pts: cant, cobrado: false };
+        log(`Chica: envite querido — ${cant} piedras en juego`, "sistema");
       }
     } else {
       // Pares, juego y punto: guardar apuesta extra; los puntos base se calculan al final
       const extra = { quien: jugGana ? "jugador" : "bot", extra: cant };
       if (tipo === "pares") {
         setApuestaExtraPares(extra);
-        log(`Pares: ${jugGana ? "tú ganas" : "bot gana"} la apuesta (${cant}). Puntos base se cuentan al final. (${desc})`, jugGana ? "exito" : "error");
+        log(`Pares: envite querido — ${cant} piedras en juego`, "sistema");
       } else if (tipo === "juego") {
         setApuestaExtraJuego(extra);
-        log(`Juego: ${jugGana ? "tú ganas" : "bot gana"} la apuesta (${cant}). Puntos base se cuentan al final. (${desc})`, jugGana ? "exito" : "error");
+        log(`Juego: envite querido — ${cant} piedras en juego`, "sistema");
       } else {
         setApuestaExtraPunto(extra);
-        log(`Punto: ${jugGana ? "tú ganas" : "bot gana"} la apuesta (${cant}). Base +1 se cuenta al final. (${desc})`, jugGana ? "exito" : "error");
+        log(`Punto: envite querido — ${cant} piedras en juego`, "sistema");
       }
     }
     setApuestaAbierta(null);
-    setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'envidada', pts: cant, quien: jugGana ? 'jugador' : 'bot' } }));
+    setEstadoLances(prev => ({ ...prev, [tipo]: { tipo: 'envidada', pts: cant, quien: null } }));
     avanzarFase(tipo);
   };
 
@@ -619,8 +609,13 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
         _res.push({ lance: "Grande", quien: jugGana ? "jugador" : "bot", pts: 1, base: 1, apostado: 0, pqNo: 0 });
       } else {
         const r = grandeResultadoRef.current;
-        if (r) _res.push({ lance: "Grande", quien: r.quien, pts: r.pts,
-          base: 0, apostado: r.pts > 1 ? r.pts : 0, pqNo: r.pts === 1 ? 1 : 0 });
+        if (r) {
+          if (!r.cobrado) {
+            if (r.quien === "jugador") { setBoteJugador(prev => prev + r.pts); log(`Grande: tú ganas ${r.pts} piedras`, "exito"); }
+            else { setBoteBot(prev => prev + r.pts); log(`Grande: bot gana ${r.pts} piedras`, "error"); }
+          }
+          _res.push({ lance: "Grande", quien: r.quien, pts: r.pts, base: 0, apostado: r.cobrado ? 0 : r.pts, pqNo: r.cobrado ? 1 : 0 });
+        }
       }
     }
 
@@ -634,8 +629,13 @@ JSON: {"accion": "quiero"|"noquiero", "razon": "breve"}`, {
         _res.push({ lance: "Chica", quien: jugGana ? "jugador" : "bot", pts: 1, base: 1, apostado: 0, pqNo: 0 });
       } else {
         const r = chicaResultadoRef.current;
-        if (r) _res.push({ lance: "Chica", quien: r.quien, pts: r.pts,
-          base: 0, apostado: r.pts > 1 ? r.pts : 0, pqNo: r.pts === 1 ? 1 : 0 });
+        if (r) {
+          if (!r.cobrado) {
+            if (r.quien === "jugador") { setBoteJugador(prev => prev + r.pts); log(`Chica: tú ganas ${r.pts} piedras`, "exito"); }
+            else { setBoteBot(prev => prev + r.pts); log(`Chica: bot gana ${r.pts} piedras`, "error"); }
+          }
+          _res.push({ lance: "Chica", quien: r.quien, pts: r.pts, base: 0, apostado: r.cobrado ? 0 : r.pts, pqNo: r.cobrado ? 1 : 0 });
+        }
       }
     }
 
@@ -1076,8 +1076,8 @@ JSON: {"declarar": ${tieneJB ? "true (tienes juego, debes declarar)" : "false (n
                 subtexto = "paso";
               } else if (e.tipo === "envidada") {
                 icono = "✓";
-                color = e.quien === "jugador" ? "#2d9e60" : "#e63946";
-                subtexto = `${e.pts} pts → ${e.quien === "jugador" ? "tú" : "bot"}`;
+                color = e.quien === "jugador" ? "#2d9e60" : e.quien === "bot" ? "#e63946" : "#F6C90E";
+                subtexto = e.quien ? `${e.pts} pts → ${e.quien === "jugador" ? "tú" : "bot"}` : `${e.pts} pts (en juego)`;
               } else if (e.tipo === "no_querida") {
                 icono = "✗";
                 color = e.quien === "jugador" ? "#2d9e60" : "#e63946";

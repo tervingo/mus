@@ -218,77 +218,75 @@ function decidirMus(feats, legal) {
 
 // ── DESCARTE ──────────────────────────────────────────────────────────────────
 
-function cartasADescartar(mano, objetivo) {
-  if (objetivo === 'juego') {
-    // Con juego se mantiene la mano, pero hay que descartar al menos 1
-    // Descartamos la peor carta para grande (la menos útil)
-    const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) }));
-    ranks.sort((a, b) => a.r - b.r);
-    return [ranks[0].i];  // descarta solo la peor carta
+// Devuelve array de índices (0-3) a descartar según la estrategia:
+// - Conservar siempre Reyes(12/3) y Caballos(11) → rango ≥ 7
+// - Si tiene medias (trío): descartar la carta extra
+// - Si tiene duples: descartar 1 de la pareja más débil (mínimo obligatorio)
+// - Con juego (≥31): descartar 1 carta mala sin romper el juego si es posible
+// - Cerca de juego (27-30): descartar A/2/4/5/6 para intentar llegar a 31
+// - Caso general: descartar todas las cartas malas (A/2/4/5/6/7)
+function cartasADescartar(mano) {
+  const pts = puntosMano(mano);
+
+  // Agrupar por valor (a efectos de pares)
+  const grupos = {};
+  mano.forEach((c, i) => {
+    const k = valorPares(c.valor);
+    if (!grupos[k]) grupos[k] = [];
+    grupos[k].push(i);
+  });
+
+  // ── 1. Medias: conservar el trío, descartar la carta extra ──
+  const triple = Object.values(grupos).find(v => v.length === 3);
+  if (triple) {
+    const keepSet = new Set(triple);
+    return [[0, 1, 2, 3].find(i => !keepSet.has(i))];
   }
 
-  if (objetivo === 'grande') {
-    const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) }));
-    return ranks.filter(x => x.r <= 1).map(x => x.i);
+  // ── 2. Duples: todas las cartas forman parejas → descartar 1 de la pareja más débil ──
+  const pairsGroups = Object.entries(grupos).filter(([, v]) => v.length >= 2);
+  if (pairsGroups.length >= 2) {
+    const peorPar = pairsGroups.sort((a, b) => Number(a[0]) - Number(b[0]))[0];
+    return [peorPar[1][0]];
   }
 
-  if (objetivo === 'chica') {
-    const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) }));
-    return ranks.filter(x => x.r >= 7).map(x => x.i);
-  }
+  // Candidatos a descartar: A(1), 2, 4, 5, 6, 7 (rangos 1-5); se conservan Sota(6)/Caballo(7)/Rey(8)
+  const ptsSinCarta = (i) => mano.reduce((s, c, j) => j !== i ? s + puntosValor(c.valor) : s, 0);
+  const malos = mano
+    .map((c, i) => ({ i, p: puntosValor(c.valor), r: rangoGrande(c.valor) }))
+    .filter(x => x.r <= 5)                        // A/2/4/5/6/7
+    .sort((a, b) => a.p - b.p || a.r - b.r);      // menor valor primero
 
-  if (objetivo === 'pares') {
-    const grupos = {};
-    mano.forEach((c, i) => {
-      const k = valorPares(c.valor);
-      if (!grupos[k]) grupos[k] = [];
-      grupos[k].push(i);
-    });
-    const pairsGroups = Object.entries(grupos).filter(([, v]) => v.length >= 2);
-    let keepers = new Set();
-    if (pairsGroups.length >= 2) {
-      pairsGroups.forEach(([, v]) => v.forEach(i => keepers.add(i)));
-    } else {
-      const mejor = Object.entries(grupos).sort((a, b) =>
-        b[1].length - a[1].length || Number(b[0]) - Number(a[0])
-      )[0];
-      if (mejor) mejor[1].forEach(i => keepers.add(i));
+  // ── 3. Con juego (≥31): descartar 1 carta mala que no rompa el juego ──
+  if (pts >= 31) {
+    for (const m of malos) {
+      if (ptsSinCarta(m.i) >= 31) return [m.i];
     }
-    return [0, 1, 2, 3].filter(i => !keepers.has(i));
+    // Ninguna carta mala mantiene el juego → descartar la peor mala (mínimo obligatorio)
+    if (malos.length > 0) return [malos[0].i];
+    // Todas las cartas son buenas → descartar la de menor rango grande
+    const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) })).sort((a, b) => a.r - b.r);
+    return [ranks[0].i];
   }
-  // Garantizar mínimo 1 carta descartada
-  // Si ningún caso anterior devolvió cartas, descarta la peor para grande
-  const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) }));
-  ranks.sort((a, b) => a.r - b.r);
+
+  // ── 4. Cerca de juego (27-30): descartar A/2/4/5/6 (≤6 pts) para intentar llegar a 31 ──
+  if (pts >= 27) {
+    const sinPtos = malos.filter(x => x.p <= 6);
+    if (sinPtos.length > 0) return sinPtos.map(x => x.i);
+    // Solo hay 7s entre los malos → descartar 1 (el de menor rango)
+    if (malos.length > 0) return [malos[0].i];
+  }
+
+  // ── 5. Caso general: descartar todas las cartas malas ──
+  if (malos.length > 0) return malos.map(x => x.i);
+
+  // Sin cartas malas (todo Sotas/Caballos/Reyes) → descartar la de menor rango grande
+  const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) })).sort((a, b) => a.r - b.r);
   return [ranks[0].i];
 }
 
-function decidirDescarte(mano, feats, cartasSeleccionadas, legal) {
-  const fg = feats.fuerza_grande_num;
-  const fc = feats.fuerza_chica_num;
-
-  let objetivo;
-  if (feats.tiene_juego) objetivo = 'juego';
-  else if (feats.tipo_pares === 'medias' || feats.tipo_pares === 'duples') objetivo = 'pares';
-  else if (fc > fg) objetivo = 'chica';
-  else if (fg > fc) objetivo = 'grande';
-  else if (feats.tipo_pares === 'pareja') objetivo = 'pares';
-  else objetivo = 'chica';
-
-  const indicesDescartar = cartasADescartar(mano, objetivo);
-
- // Garantizar mínimo 1 carta si la lista está vacía
-  let indices = indicesDescartar;
-  if (indices.length === 0) {
-    // Descarta la carta menos útil según el objetivo
-    const ranks = mano.map((c, i) => ({ i, r: rangoGrande(c.valor) }));
-    if (objetivo === 'grande' || objetivo === 'juego') {
-      ranks.sort((a, b) => a.r - b.r);  // peor para grande = menor rango
-    } else {
-      ranks.sort((a, b) => b.r - a.r);  // peor para chica = mayor rango
-    }
-    indices = [ranks[0].i];
-  }
+function decidirDescarte(mano, _feats, cartasSeleccionadas, legal) {
+  const indices = cartasADescartar(mano);
 
   const selAcciones = [ACT_SEL_CARTA_0, ACT_SEL_CARTA_1, ACT_SEL_CARTA_2, ACT_SEL_CARTA_3];
   for (const idx of indices) {
